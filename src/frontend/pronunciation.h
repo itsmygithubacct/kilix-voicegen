@@ -53,6 +53,7 @@ class PronunciationLexicon final {
 public:
     const PronunciationEntry *find(std::string_view grapheme,
                                    std::string_view role) const;
+    bool contains_grapheme(std::string_view grapheme) const;
 
     const std::string &resource_id() const noexcept;
     const std::string &resource_sha256() const noexcept;

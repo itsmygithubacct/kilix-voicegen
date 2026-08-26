@@ -548,6 +548,25 @@ const PronunciationEntry *PronunciationLexicon::find(
     return nullptr;
 }
 
+bool PronunciationLexicon::contains_grapheme(
+    std::string_view grapheme) const {
+    if (grapheme.empty() || grapheme.size() > kMaximumGraphemeBytes) {
+        return false;
+    }
+    const auto lookup = [&](char mode, std::string_view key_grapheme) {
+        const std::string prefix = index_key(mode, key_grapheme, {});
+        const auto found = index_.lower_bound(prefix);
+        return found != index_.end() &&
+               found->first.size() > prefix.size() &&
+               found->first.compare(0U, prefix.size(), prefix) == 0;
+    };
+    if (lookup('e', grapheme)) {
+        return true;
+    }
+    std::string folded;
+    return ascii_fold(grapheme, &folded) && lookup('f', folded);
+}
+
 const std::string &PronunciationLexicon::resource_id() const noexcept {
     return resource_id_;
 }

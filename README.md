@@ -131,6 +131,16 @@ paragraph/sentence/clause/comma boundaries in that order when a chunk is
 required, and marks both sides of a forced word-boundary continuation. No
 product inventory or final token IDs have yet been frozen.
 
+An internal resolved-frontend operation now joins the three resource types. It
+requires one admission class and segment inventory, binds the LTS model to the
+exact loaded lexicon and the token inventory to a caller-pinned frontend ABI,
+and requires product lexicon/LTS review hashes to agree. It resolves
+role-qualified lexicon entries before LTS, retains per-word provenance, and
+feeds the result directly into bounded token packing with no partial output on
+failure. A known grapheme with unresolved role variants fails as ambiguous
+instead of falling through to LTS. This seam uses synthetic fixtures only and
+is not yet called by the public synthesis engine.
+
 `tools/build_en_au_lexicon_candidate.py` converts an explicitly hashed CMUdict
 snapshot into a deterministic candidate and Australian-review queue outside the
 tree. Its output records both source and generator revisions/hashes, is

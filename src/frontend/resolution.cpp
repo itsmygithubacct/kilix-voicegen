@@ -1,0 +1,320 @@
+#include "frontend/resolution.h"
+
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+#include "kilix_voicegen.h"
+#include "runtime/sha256.h"
+
+namespace kgv {
+namespace {
+
+int reject(ResolvedFrontendResult *result,
+           ResolvedFrontendFailure *failure,
+           int status,
+           std::string code,
+           std::string message,
+           SourceSpan span = {},
+           std::size_t word_index = 0U,
+           bool has_word = false) {
+    if (result != nullptr) {
+        *result = ResolvedFrontendResult{};
+    }
+    if (failure != nullptr) {
+        failure->status = status;
+        failure->code = std::move(code);
+        failure->message = std::move(message);
+        failure->span = span;
+        failure->word_index = word_index;
+        failure->has_word = has_word;
+    }
+    return status;
+}
+
+bool resource_admission(PronunciationAdmission admission) noexcept {
+    return admission == PronunciationAdmission::product_admitted ||
+           admission == PronunciationAdmission::test_fixture;
+}
+
+bool stable_role(std::string_view role) noexcept {
+    if (role.empty() || role.size() > 32U || role.front() < 'a' ||
+        role.front() > 'z') {
+        return false;
+    }
+    return std::all_of(role.begin(), role.end(), [](char character) {
+        return (character >= 'a' && character <= 'z') ||
+               (character >= '0' && character <= '9') || character == '-';
+    });
+}
+
+bool contains_role(const PronunciationEntry &entry,
+                   std::string_view role) noexcept {
+    return std::find(entry.roles.begin(), entry.roles.end(), role) !=
+           entry.roles.end();
+}
+
+bool lts_key(std::string_view grapheme, std::string *key) {
+    key->clear();
+    if (grapheme.empty() || grapheme.size() > 256U) {
+        return false;
+    }
+    key->reserve(grapheme.size());
+    for (std::size_t index = 0U; index < grapheme.size(); ++index) {
+        char character = grapheme[index];
+        if (character >= 'A' && character <= 'Z') {
+            character = static_cast<char>(character + ('a' - 'A'));
+        }
+        const bool letter = character >= 'a' && character <= 'z';
+        const bool internal_separator =
+            (character == '\'' || character == '-') && index > 0U &&
+            index + 1U < grapheme.size();
+        if (!letter && !internal_separator) {
+            key->clear();
+            return false;
+        }
+        key->push_back(character);
+    }
+    return true;
+}
+
+bool resources_loaded(const ResolvedFrontendResources &resources) noexcept {
+    return resources.base_lexicon != nullptr && resources.lts != nullptr &&
+           resources.model_tokens != nullptr &&
+           !resources.base_lexicon->resource_sha256().empty() &&
+           resources.base_lexicon->entry_count() > 0U &&
+           !resources.lts->resource_sha256().empty() &&
+           resources.lts->node_count() > 0U && resources.lts->root_count() > 0U &&
+           !resources.model_tokens->resource_sha256().empty() &&
+           resources.model_tokens->entry_count() > 17U;
+}
+
+int validate_resources(const ResolvedFrontendResources &resources,
+                       ResolvedFrontendResult *result,
+                       ResolvedFrontendFailure *failure) {
+    if (!resource_admission(resources.required_admission) ||
+        !is_lower_sha256(resources.expected_frontend_abi_sha256)) {
+        return reject(result, failure, KGV_INVALID_ARGUMENT,
+                      "INVALID_RESOLVED_FRONTEND_RESOURCES",
+                      "resolved frontend requires a product or test admission and a pinned ABI");
+    }
+    if (!resources_loaded(resources)) {
+        return reject(result, failure, KGV_INVALID_STATE,
+                      "RESOLVED_FRONTEND_RESOURCE_NOT_LOADED",
+                      "resolved frontend resources are not loaded");
+    }
+    const PronunciationLexicon &lexicon = *resources.base_lexicon;
+    const LtsModel &lts = *resources.lts;
+    const ModelTokenInventory &tokens = *resources.model_tokens;
+    if (lexicon.admission() != resources.required_admission ||
+        lts.admission() != resources.required_admission ||
+        tokens.admission() != resources.required_admission) {
+        return reject(result, failure, KGV_ABI_MISMATCH,
+                      "FRONTEND_RESOURCE_ADMISSION_MISMATCH",
+                      "frontend resources do not share the required admission");
+    }
+    if (lexicon.segment_inventory_sha256().empty() ||
+        lexicon.segment_inventory_sha256() !=
+            lts.segment_inventory_sha256() ||
+        lexicon.segment_inventory_sha256() !=
+            tokens.segment_inventory_sha256()) {
+        return reject(result, failure, KGV_ABI_MISMATCH,
+                      "FRONTEND_SEGMENT_INVENTORY_MISMATCH",
+                      "frontend resources do not share one segment inventory");
+    }
+    if (lts.source_lexicon_sha256() != lexicon.resource_sha256()) {
+        return reject(result, failure, KGV_ABI_MISMATCH,
+                      "FRONTEND_LTS_LEXICON_MISMATCH",
+                      "LTS model is not bound to the loaded pronunciation lexicon");
+    }
+    if (tokens.frontend_abi_sha256() !=
+        resources.expected_frontend_abi_sha256) {
+        return reject(result, failure, KGV_ABI_MISMATCH,
+                      "FRONTEND_TOKEN_ABI_MISMATCH",
+                      "model-token inventory targets another frontend ABI");
+    }
+    if (resources.required_admission ==
+            PronunciationAdmission::product_admitted &&
+        (lexicon.review_record_sha256().empty() ||
+         lexicon.review_record_sha256() != lts.review_record_sha256())) {
+        return reject(result, failure, KGV_ABI_MISMATCH,
+                      "FRONTEND_REVIEW_RECORD_MISMATCH",
+                      "product lexicon and LTS model lack one review binding");
+    }
+    return KGV_OK;
+}
+
+ResolvedPronunciationSource lexicon_source(
+    PronunciationAdmission admission,
+    std::string_view lexical_source_kind) noexcept {
+    if (lexical_source_kind == "SPELLING") {
+        return ResolvedPronunciationSource::spelling;
+    }
+    return admission == PronunciationAdmission::product_admitted
+               ? ResolvedPronunciationSource::product_lexicon
+               : ResolvedPronunciationSource::base_lexicon;
+}
+
+}  // namespace
+
+int run_resolved_frontend(
+    std::string_view text,
+    std::uint32_t profile,
+    const ResolvedFrontendResources &resources,
+    const std::vector<std::string> &word_roles,
+    ResolvedFrontendResult *result,
+    ResolvedFrontendFailure *failure) {
+    if (result == nullptr || failure == nullptr) {
+        return reject(result, failure, KGV_INVALID_ARGUMENT,
+                      "INVALID_RESOLVED_FRONTEND_ARGUMENT",
+                      "resolved frontend requires output records");
+    }
+    *result = ResolvedFrontendResult{};
+    *failure = ResolvedFrontendFailure{};
+    const int resource_status = validate_resources(resources, result, failure);
+    if (resource_status != KGV_OK) {
+        return resource_status;
+    }
+
+    LexicalFrontendResult lexical;
+    FrontendFailure lexical_failure;
+    const int lexical_status =
+        run_lexical_frontend(text, profile, &lexical, &lexical_failure);
+    if (lexical_status != KGV_OK) {
+        return reject(result, failure, lexical_status, lexical_failure.code,
+                      lexical_failure.message,
+                      SourceSpan{lexical_failure.byte_offset,
+                                 lexical_failure.byte_offset});
+    }
+    if (!word_roles.empty() && word_roles.size() != lexical.words.size()) {
+        return reject(result, failure, KGV_INVALID_ARGUMENT,
+                      "FRONTEND_ROLE_COUNT_MISMATCH",
+                      "word-role count does not match expanded frontend words");
+    }
+
+    result->profile = lexical.profile;
+    result->input_bytes = lexical.input_bytes;
+    result->frontend_abi_sha256 = resources.expected_frontend_abi_sha256;
+    result->pronunciation_lexicon_sha256 =
+        resources.base_lexicon->resource_sha256();
+    result->lts_sha256 = resources.lts->resource_sha256();
+    result->diagnostics = lexical.diagnostics;
+    result->words.reserve(lexical.words.size());
+
+    std::vector<ResolvedTokenWord> token_words;
+    token_words.reserve(lexical.words.size());
+    for (std::size_t index = 0U; index < lexical.words.size(); ++index) {
+        const LexicalWord &lexical_word = lexical.words[index];
+        const std::string role = word_roles.empty() || word_roles[index].empty()
+                                     ? "default"
+                                     : word_roles[index];
+        if (!stable_role(role)) {
+            return reject(result, failure, KGV_INVALID_ARGUMENT,
+                          "INVALID_FRONTEND_WORD_ROLE",
+                          "frontend word role is not canonical",
+                          lexical_word.span, index, true);
+        }
+
+        ResolvedFrontendWord resolved;
+        resolved.normalized = lexical_word.normalized;
+        resolved.source_kind = lexical_word.source_kind;
+        resolved.role = role;
+        resolved.span = lexical_word.span;
+        const PronunciationEntry *entry =
+            resources.base_lexicon->find(lexical_word.normalized, role);
+        if (entry != nullptr) {
+            resolved.syllables = entry->syllables;
+            resolved.pronunciation_source = lexicon_source(
+                resources.required_admission, lexical_word.source_kind);
+            if (role != "default" && !contains_role(*entry, role)) {
+                result->diagnostics.push_back(FrontendDiagnostic{
+                    "HETERONYM_DEFAULTED", "WARNING", lexical_word.span,
+                });
+            }
+        } else {
+            if (resources.base_lexicon->contains_grapheme(
+                    lexical_word.normalized)) {
+                return reject(result, failure, KGV_INVALID_TEXT,
+                              "AMBIGUOUS_PRONUNCIATION_ROLE",
+                              "known word lacks a reviewed pronunciation for its role",
+                              lexical_word.span, index, true);
+            }
+            if (lexical_word.source_kind == "SPELLING") {
+                return reject(result, failure, KGV_INVALID_TEXT,
+                              "UNKNOWN_PRONUNCIATION",
+                              "spelled word lacks an admitted letter-name pronunciation",
+                              lexical_word.span, index, true);
+            }
+            std::string key;
+            if (!lts_key(lexical_word.normalized, &key)) {
+                return reject(result, failure, KGV_INVALID_TEXT,
+                              "UNKNOWN_PRONUNCIATION",
+                              "word has no admitted lexicon or LTS pronunciation",
+                              lexical_word.span, index, true);
+            }
+            LtsFailure lts_failure;
+            const int lts_status =
+                resources.lts->pronounce(key, &resolved.syllables, &lts_failure);
+            if (lts_status != KGV_OK) {
+                if (lts_status == KGV_INVALID_TEXT) {
+                    return reject(result, failure, KGV_INVALID_TEXT,
+                                  "UNKNOWN_PRONUNCIATION",
+                                  "word has no admitted lexicon or LTS pronunciation",
+                                  lexical_word.span, index, true);
+                }
+                return reject(result, failure, lts_status, lts_failure.code,
+                              lts_failure.message, lexical_word.span, index,
+                              true);
+            }
+            resolved.pronunciation_source = ResolvedPronunciationSource::lts;
+        }
+
+        ResolvedTokenWord token_word;
+        token_word.span = resolved.span;
+        token_word.syllables = resolved.syllables;
+        token_words.push_back(std::move(token_word));
+        result->words.push_back(std::move(resolved));
+    }
+
+    result->phrases.reserve(lexical.phrases.size());
+    for (const LexicalPhrase &phrase : lexical.phrases) {
+        if (phrase.word_start == phrase.word_end) {
+            continue;
+        }
+        result->phrases.push_back(ResolvedTokenPhrase{
+            phrase.word_start,
+            phrase.word_end,
+            phrase.terminator,
+            phrase.span,
+        });
+    }
+
+    ModelTokenFailure token_failure;
+    const int token_status = serialize_model_tokens(
+        *resources.model_tokens, lexical.input_bytes, token_words,
+        result->phrases, &result->model_tokens, &token_failure);
+    if (token_status != KGV_OK) {
+        return reject(result, failure, token_status, token_failure.code,
+                      token_failure.message);
+    }
+    return KGV_OK;
+}
+
+const char *resolved_pronunciation_source_name(
+    ResolvedPronunciationSource value) noexcept {
+    switch (value) {
+        case ResolvedPronunciationSource::base_lexicon:
+            return "BASE_LEXICON";
+        case ResolvedPronunciationSource::product_lexicon:
+            return "PRODUCT_LEXICON";
+        case ResolvedPronunciationSource::lts: return "LTS";
+        case ResolvedPronunciationSource::spelling: return "SPELLING";
+    }
+    return "UNKNOWN";
+}
+
+}  // namespace kgv

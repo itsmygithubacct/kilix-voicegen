@@ -107,6 +107,8 @@ void expect_failure(std::string resource,
     }
     require(lexicon.entry_count() == 0U, "failed load retained entries");
     require(lexicon.resource_id().empty(), "failed load retained metadata");
+    require(!lexicon.contains_grapheme("hello"),
+            "failed load retained the known-grapheme index");
 }
 
 }  // namespace
@@ -166,6 +168,12 @@ int main() {
                 "heteronym variants lost distinct segment IDs");
         require(lexicon.find("record", "adjective") == nullptr,
                 "missing role incorrectly selected another variant");
+        require(lexicon.contains_grapheme("RECORD") &&
+                    lexicon.contains_grapheme("hello") &&
+                    lexicon.contains_grapheme("Kilix") &&
+                    !lexicon.contains_grapheme("KILIX") &&
+                    !lexicon.contains_grapheme("absent"),
+                "known-grapheme index changed case or membership semantics");
 
         {
             kgv::PronunciationLexicon rejected = lexicon;
@@ -180,6 +188,8 @@ int main() {
                     "resource hash mismatch returned the wrong code");
             require(rejected.entry_count() == 0U,
                     "hash mismatch retained a previously loaded lexicon");
+            require(!rejected.contains_grapheme("hello"),
+                    "hash mismatch retained a known-grapheme index");
         }
         {
             kgv::PronunciationLexicon rejected;

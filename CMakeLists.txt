@@ -88,6 +88,7 @@ add_library(kilix_voicegen_frontend STATIC
   src/frontend/lts.cpp
   src/frontend/pipeline.cpp
   src/frontend/pronunciation.cpp
+  src/frontend/resolution.cpp
   src/frontend/tokenization.cpp)
 target_include_directories(kilix_voicegen_frontend PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -309,6 +310,15 @@ if(BUILD_TESTING)
   kgv_project_warnings(test_tokenization)
   kgv_sanitizers(test_tokenization)
   add_test(NAME model_token_serialization COMMAND test_tokenization)
+
+  add_executable(test_resolution tests/test_resolution.cpp)
+  target_link_libraries(test_resolution PRIVATE kilix_voicegen_frontend)
+  target_include_directories(test_resolution PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  kgv_project_warnings(test_resolution)
+  kgv_sanitizers(test_resolution)
+  add_test(NAME resolved_frontend_integration COMMAND test_resolution)
 
   if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT KGV_ENABLE_SANITIZERS)
     find_package(Threads REQUIRED)
