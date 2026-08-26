@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:kilix:voicegen:schema:frontend-result:v1",
+  "title": "Kilix Voicegen typed English frontend result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "profile", "unicode_version", "input_bytes", "tokens", "words", "phrases", "chunks", "diagnostics"],
+  "properties": {
+    "schema": {"const": "kilix.voicegen.frontend-result/v1"},
+    "profile": {"enum": ["prose", "terminal"]},
+    "unicode_version": {"const": "17.0.0"},
+    "input_bytes": {"type": "integer", "minimum": 0, "maximum": 65536},
+    "tokens": {"type": "array", "items": {"$ref": "#/$defs/token"}},
+    "words": {"type": "array", "items": {"$ref": "#/$defs/word"}},
+    "phrases": {"type": "array", "items": {"$ref": "#/$defs/phrase"}},
+    "chunks": {"type": "array", "items": {"$ref": "#/$defs/chunk"}},
+    "diagnostics": {"type": "array", "items": {"$ref": "#/$defs/diagnostic"}}
+  },
+  "$defs": {
+    "span": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["byte_start", "byte_end"],
+      "properties": {
+        "byte_start": {"type": "integer", "minimum": 0, "maximum": 65536},
+        "byte_end": {"type": "integer", "minimum": 0, "maximum": 65536}
+      }
+    },
+    "token": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "span", "surface_sha256"],
+      "properties": {
+        "kind": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$"},
+        "span": {"$ref": "#/$defs/span"},
+        "surface_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "word": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["span", "source_kind", "pronunciation_source", "syllables"],
+      "properties": {
+        "span": {"$ref": "#/$defs/span"},
+        "source_kind": {"enum": ["LITERAL", "EXPANSION", "ALIAS", "SPELLING"]},
+        "pronunciation_source": {"enum": ["REQUEST_OVERRIDE", "USER_DICTIONARY", "PRODUCT_LEXICON", "BASE_LEXICON", "CONTEXT_RULE", "LTS", "SPELLING"]},
+        "syllables": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/syllable"}}
+      }
+    },
+    "syllable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stress", "segment_ids"],
+      "properties": {
+        "stress": {"enum": ["NONE", "PRIMARY", "SECONDARY"]},
+        "segment_ids": {"type": "array", "minItems": 1, "items": {"type": "integer", "minimum": 1, "maximum": 65535}}
+      }
+    },
+    "phrase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["word_start", "word_end", "terminator"],
+      "properties": {
+        "word_start": {"type": "integer", "minimum": 0},
+        "word_end": {"type": "integer", "minimum": 0},
+        "terminator": {"enum": ["NONE", "PERIOD", "QUESTION", "EXCLAMATION", "COLON", "SEMICOLON", "PARAGRAPH", "CONTINUATION"]}
+      }
+    },
+    "chunk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["token_ids", "continuation"],
+      "properties": {
+        "token_ids": {"type": "array", "minItems": 2, "items": {"type": "integer", "minimum": 0, "maximum": 65535}},
+        "continuation": {"type": "boolean"}
+      }
+    },
+    "diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "severity", "span"],
+      "properties": {
+        "code": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$"},
+        "severity": {"enum": ["INFO", "WARNING", "ERROR"]},
+        "span": {"$ref": "#/$defs/span"}
+      }
+    }
+  }
+}

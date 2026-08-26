@@ -1,0 +1,14 @@
+Kilix Voicegen
+Copyright (c) 2026 Kilix Voicegen contributors
+
+This foundation snapshot is first-party source and contains no neural weights,
+voice recordings, generated speech, copied linguistic data, or vendored
+third-party source.
+
+The deterministic fixture graph under tests/fixtures is first-party test data.
+It produces a synthetic triangle-wave signal solely to exercise the runtime
+contract; it is not a speech model.
+
+Planned dependencies are pinned in cmake/dependencies.lock.json. Their source
+and notices are not distributed by this snapshot. Any future distribution that
+includes those dependencies must include their exact applicable notices.

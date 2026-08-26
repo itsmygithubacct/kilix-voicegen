@@ -1,0 +1,37 @@
+{
+  "schema": "kilix.voicegen.benchmark-inputs/v1",
+  "source_bundle": "phase-01-final",
+  "inputs": [
+    {
+      "id": "benchmark-method-v1",
+      "source_name": "BENCHMARK_METHOD.md",
+      "bytes": 15053,
+      "sha256": "cc0cdd0567853053e1f261c9957f3e593c7a9a1c3d30fc437fa656467ad96677"
+    },
+    {
+      "id": "benchmark-corpus-v1",
+      "source_name": "bench/corpus.jsonl",
+      "bytes": 2211,
+      "records": 12,
+      "sha256": "5f0d433dd2b08e5e2745ef3cf0c3c81ac6d35abbbc0c1d8ed0bb41853fdb4019"
+    },
+    {
+      "id": "benchmark-corpus-license-v1",
+      "source_name": "bench/CORPUS_LICENSE.md",
+      "bytes": 599,
+      "sha256": "cdc3aee313148eb49f145c7cafba69345ea1399942c732d03a93a083564e9440"
+    },
+    {
+      "id": "benchmark-corpus-provenance-v1",
+      "source_name": "bench/CORPUS_PROVENANCE.md",
+      "bytes": 1212,
+      "sha256": "95c72a596f6e38eedf908a2093ab251d64c6c6259641a714e136cd2a6f7bd453"
+    },
+    {
+      "id": "benchmark-report-baseline-v1",
+      "source_name": "BENCHMARK_REPORT.md",
+      "bytes": 14888,
+      "sha256": "7036a1676c8737d324397c140465bf028c20bb2f9af138e85209541515c8fa6d"
+    }
+  ]
+}

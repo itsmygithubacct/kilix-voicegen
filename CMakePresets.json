@@ -1,0 +1,67 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 24,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "dev",
+      "displayName": "Developer build",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceParentDir}/.build/kilix-voicegen-dev",
+      "cacheVariables": {
+        "BUILD_TESTING": "ON",
+        "CMAKE_BUILD_TYPE": "Debug",
+        "KGV_WARNINGS_AS_ERRORS": "ON"
+      }
+    },
+    {
+      "name": "asan-ubsan",
+      "displayName": "ASan and UBSan",
+      "inherits": "dev",
+      "binaryDir": "${sourceParentDir}/.build/kilix-voicegen-asan",
+      "cacheVariables": {
+        "KGV_ENABLE_SANITIZERS": "ON"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "Release build",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceParentDir}/.build/kilix-voicegen-release",
+      "cacheVariables": {
+        "BUILD_TESTING": "ON",
+        "CMAKE_BUILD_TYPE": "Release",
+        "KGV_WARNINGS_AS_ERRORS": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {"name": "dev", "configurePreset": "dev"},
+    {"name": "asan-ubsan", "configurePreset": "asan-ubsan"},
+    {"name": "release", "configurePreset": "release"}
+  ],
+  "testPresets": [
+    {
+      "name": "dev",
+      "configurePreset": "dev",
+      "output": {"outputOnFailure": true}
+    },
+    {
+      "name": "asan-ubsan",
+      "configurePreset": "asan-ubsan",
+      "output": {"outputOnFailure": true},
+      "environment": {
+        "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1",
+        "UBSAN_OPTIONS": "halt_on_error=1:print_stacktrace=1"
+      }
+    },
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "output": {"outputOnFailure": true}
+    }
+  ]
+}

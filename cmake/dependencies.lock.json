@@ -1,0 +1,26 @@
+{
+  "schema": "kilix.voicegen.dependencies/v1",
+  "dependencies": [
+    {
+      "name": "utf8proc",
+      "role": "unicode-decoding-categories-and-nfc",
+      "version": "2.11.3",
+      "revision": "0075ed7d0adba45682ee6bf7a83b10f8fd110163",
+      "unicode_version": "17.0.0",
+      "source": "https://github.com/JuliaStrings/utf8proc.git",
+      "license": "MIT-Expat plus Unicode data notices",
+      "enabled_in_foundation_fixture": false
+    },
+    {
+      "name": "onnxruntime",
+      "role": "cpu-neural-inference",
+      "version": "1.29.0",
+      "revision": "2e2543fbe9fae542f921d47a72d21d5a4ef0b710",
+      "release_tag": "v1.29.0",
+      "source": "https://github.com/microsoft/onnxruntime.git",
+      "license": "MIT plus bundled third-party notices",
+      "execution_providers": ["CPUExecutionProvider"],
+      "enabled_in_foundation_fixture": false
+    }
+  ]
+}

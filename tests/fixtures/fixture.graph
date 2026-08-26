@@ -1,0 +1,4 @@
+KILIX-VOICEGEN-FIXTURE-GRAPH
+schema=fixture-tone/v1
+output=deterministic-integer-triangle-wave
+purpose=stream-cancel-backpressure-and-package-contract-tests

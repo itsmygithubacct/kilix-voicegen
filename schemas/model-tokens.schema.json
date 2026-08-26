@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:kilix:voicegen:schema:model-tokens:v1",
+  "title": "Kilix Voicegen strict model-token record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "inventory_sha256", "chunks"],
+  "properties": {
+    "schema": {"const": "kilix.voicegen.tokens/v1"},
+    "inventory_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "chunks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ids", "source_byte_start", "source_byte_end", "continuation"],
+        "properties": {
+          "ids": {"type": "array", "minItems": 2, "items": {"type": "integer", "minimum": 0, "maximum": 65535}},
+          "source_byte_start": {"type": "integer", "minimum": 0, "maximum": 65536},
+          "source_byte_end": {"type": "integer", "minimum": 0, "maximum": 65536},
+          "continuation": {"type": "boolean"}
+        }
+      }
+    }
+  }
+}

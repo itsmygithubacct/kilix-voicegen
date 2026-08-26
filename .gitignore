@@ -1,0 +1,35 @@
+# Out-of-tree builds are required, but ignore common accidental build outputs.
+/build/
+/cmake-build-*/
+/dist/
+*.o
+*.a
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+
+# Python tooling state.
+/.venv/
+__pycache__/
+*.py[cod]
+/.pytest_cache/
+/.mypy_cache/
+
+# Generated audio, models, and experiment artifacts never belong in this tree.
+*.wav
+*.flac
+*.onnx
+*.pt
+*.pth
+*.safetensors
+*.npz
+*.npy
+*.bin
+*.part
+
+# Editor and platform noise.
+.DS_Store
+*~
+*.swp

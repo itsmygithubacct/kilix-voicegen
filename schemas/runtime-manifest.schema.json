@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:kilix:voicegen:schema:runtime-manifest:v1",
+  "title": "Kilix Voicegen installed native runtime manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "version", "abi_version", "target", "dependencies", "files", "build"],
+  "properties": {
+    "schema": {"const": "kilix.voicegen.runtime/v1"},
+    "version": {"type": "string", "minLength": 1, "maxLength": 64},
+    "abi_version": {"const": 1},
+    "target": {"type": "string", "minLength": 1, "maxLength": 128},
+    "dependencies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "version", "revision", "license"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1, "maxLength": 128},
+          "version": {"type": "string", "minLength": 1, "maxLength": 64},
+          "revision": {"type": "string", "minLength": 1, "maxLength": 128},
+          "license": {"type": "string", "minLength": 1, "maxLength": 256}
+        }
+      }
+    },
+    "files": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "bytes", "sha256"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1, "maxLength": 255},
+          "bytes": {"type": "integer", "minimum": 1},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        }
+      }
+    },
+    "build": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["compiler", "cmake", "flags", "source_revision"],
+      "properties": {
+        "compiler": {"type": "string", "minLength": 1, "maxLength": 256},
+        "cmake": {"type": "string", "minLength": 1, "maxLength": 64},
+        "flags": {"type": "array", "items": {"type": "string", "maxLength": 512}},
+        "source_revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"}
+      }
+    }
+  }
+}

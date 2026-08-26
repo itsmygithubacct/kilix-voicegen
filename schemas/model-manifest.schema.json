@@ -1,0 +1,189 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:kilix:voicegen:schema:model-manifest:v1",
+  "title": "Kilix Voicegen immutable model manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "model_id", "version", "engine", "revisions", "runtime_abi",
+    "audio", "frontend", "voices", "quantization", "required_cpu_features",
+    "files", "tensors", "licenses", "determinism", "resources", "limitations"
+  ],
+  "properties": {
+    "schema": {"const": "kilix.voicegen.model/v1"},
+    "model_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,126}[a-z0-9]$"},
+    "version": {"type": "string", "minLength": 1, "maxLength": 64},
+    "engine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {"kind": {"type": "string", "minLength": 1, "maxLength": 64}}
+    },
+    "revisions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["architecture", "export", "training"],
+      "properties": {
+        "architecture": {"type": "string", "minLength": 1, "maxLength": 128},
+        "export": {"type": "string", "minLength": 1, "maxLength": 128},
+        "training": {"type": "string", "minLength": 1, "maxLength": 128}
+      }
+    },
+    "runtime_abi": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimum", "maximum"],
+      "properties": {
+        "minimum": {"type": "integer", "minimum": 1, "maximum": 4294967295},
+        "maximum": {"type": "integer", "minimum": 1, "maximum": 4294967295}
+      }
+    },
+    "audio": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sample_rate", "channels", "sample_format"],
+      "properties": {
+        "sample_rate": {"const": 24000},
+        "channels": {"const": 1},
+        "sample_format": {"const": "s16"}
+      }
+    },
+    "frontend": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "unicode_version", "token_schema", "inventory_sha256", "segment_ids"],
+      "properties": {
+        "schema": {"const": "kilix.voicegen.frontend/v1"},
+        "unicode_version": {"const": "17.0.0"},
+        "token_schema": {"const": "kilix.voicegen.tokens/v1"},
+        "inventory_sha256": {"$ref": "#/$defs/sha256"},
+        "segment_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 65535,
+          "uniqueItems": true,
+          "items": {"type": "integer", "minimum": 1, "maximum": 65535}
+        }
+      }
+    },
+    "voices": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "label"],
+        "properties": {
+          "id": {"enum": ["kilix-female-01", "kilix-male-01"]},
+          "label": {"type": "string", "minLength": 1, "maxLength": 80}
+        }
+      }
+    },
+    "quantization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["precision", "policy"],
+      "properties": {
+        "precision": {"enum": ["fixture", "fp32", "fp16", "int8", "mixed"]},
+        "policy": {"type": "string", "minLength": 1, "maxLength": 256}
+      }
+    },
+    "required_cpu_features": {
+      "type": "array",
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"}
+    },
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "role", "bytes", "sha256"],
+        "properties": {
+          "path": {"$ref": "#/$defs/relative_path"},
+          "role": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$"},
+          "bytes": {"type": "integer", "minimum": 0},
+          "sha256": {"$ref": "#/$defs/sha256"}
+        }
+      }
+    },
+    "tensors": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "io", "dtype", "shape"],
+        "properties": {
+          "name": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_.:/-]{0,126}$"},
+          "io": {"enum": ["input", "output"]},
+          "dtype": {"enum": ["float32", "float16", "int64", "int32", "int16", "uint8"]},
+          "shape": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 8,
+            "items": {
+              "oneOf": [
+                {"type": "integer", "minimum": 1, "maximum": 2147483647},
+                {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,31}$"}
+              ]
+            }
+          }
+        }
+      }
+    },
+    "licenses": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 128,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["component", "license"],
+        "properties": {
+          "component": {"type": "string", "minLength": 1, "maxLength": 128},
+          "license": {"type": "string", "minLength": 1, "maxLength": 128},
+          "notice_path": {"$ref": "#/$defs/relative_path"}
+        }
+      }
+    },
+    "determinism": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["class", "default_seed", "test_vector_sha256"],
+      "properties": {
+        "class": {"enum": ["platform-independent-integer", "platform-class", "best-effort"]},
+        "default_seed": {"type": "string", "pattern": "^[0-9]{1,20}$"},
+        "test_vector_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model_bytes", "minimum_memory_bytes"],
+      "properties": {
+        "model_bytes": {"type": "integer", "minimum": 0},
+        "minimum_memory_bytes": {"type": "integer", "minimum": 0}
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {"type": "string", "minLength": 1, "maxLength": 512}
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "relative_path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)[A-Za-z0-9._/-]+$"
+    }
+  }
+}

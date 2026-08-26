@@ -1,0 +1,13 @@
+KILIX_VOICEGEN_1 {
+  global:
+    kgv_abi_version;
+    kgv_status_name;
+    kgv_engine_open;
+    kgv_job_create;
+    kgv_job_run;
+    kgv_job_cancel;
+    kgv_job_destroy;
+    kgv_engine_close;
+  local:
+    *;
+};

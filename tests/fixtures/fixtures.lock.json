@@ -1,0 +1,13 @@
+{
+  "schema": "kilix.voicegen.test-fixtures/v1",
+  "fixtures": [
+    {
+      "path": "fixture.graph",
+      "bytes": 157,
+      "sha256": "2a37a107d8e87bda61379f484cd142170466c764e80aa2d8a8503b603b2ff33a",
+      "origin": "first-party",
+      "license": "repository rights notice",
+      "purpose": "deterministic package, stream, backpressure, and cancellation tests"
+    }
+  ]
+}

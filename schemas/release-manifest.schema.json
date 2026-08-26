@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:kilix:voicegen:schema:release-manifest:v1",
+  "title": "Kilix Voicegen outer release index",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "manifest"],
+  "properties": {
+    "schema": {"const": "kilix.voicegen.release/v1"},
+    "manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "bytes", "sha256"],
+      "properties": {
+        "path": {"const": "MANIFEST.json"},
+        "bytes": {"type": "integer", "minimum": 1, "maximum": 1048576},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}
