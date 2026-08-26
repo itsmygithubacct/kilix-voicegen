@@ -7,12 +7,13 @@ CPU-operability floor.
 
 ## Current status
 
-Phase 2 foundation is in progress. The repository currently provides the
-frozen C ABI draft, strict model-package verification, the first UTF-8/control
-validation slice, a native CLI, and a deterministic fixture engine. The fixture
-emits a quiet triangle-wave test signal so streaming, backpressure,
-cancellation, corruption handling, and language bindings can be tested without
-a model.
+Phase 2 milestone P0 (foundation and frozen contracts) is complete. The
+repository provides the frozen C ABI draft, strict model-package verification,
+the first UTF-8/control validation slice, a native CLI, and a deterministic
+fixture engine. Milestone P1, the complete English frontend and two-voice
+recording pilot, is next. The fixture emits a quiet triangle-wave test signal so
+streaming, backpressure, cancellation, corruption handling, and language
+bindings can be tested without a model.
 
 **This snapshot does not yet produce speech.** It contains no trained model,
 recorded voice, downloaded checkpoint, or generated audio.
