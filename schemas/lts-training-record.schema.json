@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:kilix:voicegen:schema:lts-training-record:v1",
+  "title": "Kilix Voicegen deterministic compact LTS training record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "status", "admission", "dialect", "resource_id", "source_lexicon_sha256", "alignment_record_sha256", "license_record_sha256", "review_record_sha256", "segment_inventory_sha256", "aligned_corpus", "generator", "config", "model_shape", "metrics"],
+  "properties": {
+    "schema": {"const": "kilix.voicegen.lts-training-record/v1"},
+    "status": {"enum": ["product-admitted", "non-product-training-fixture"]},
+    "admission": {"enum": ["product-admitted", "local-user", "test-fixture"]},
+    "dialect": {"const": "en-AU"},
+    "resource_id": {"type": "string", "pattern": "^[a-z][a-z0-9._:/-]{0,127}$"},
+    "source_lexicon_sha256": {"$ref": "#/$defs/sha256"},
+    "alignment_record_sha256": {"$ref": "#/$defs/sha256"},
+    "license_record_sha256": {"$ref": "#/$defs/sha256"},
+    "review_record_sha256": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/sha256"}]},
+    "segment_inventory_sha256": {"$ref": "#/$defs/sha256"},
+    "aligned_corpus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bytes", "entries", "sha256"],
+      "properties": {
+        "bytes": {"type": "integer", "minimum": 1, "maximum": 268435456},
+        "entries": {"type": "integer", "minimum": 1, "maximum": 200000},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "generator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["revision", "sha256"],
+      "properties": {
+        "revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["context_left", "context_right", "criterion", "heldout_percent", "leaf_policy", "max_depth", "min_leaf", "split_algorithm", "split_seed", "tie_break"],
+      "properties": {
+        "context_left": {"type": "integer", "minimum": 0, "maximum": 8},
+        "context_right": {"type": "integer", "minimum": 0, "maximum": 8},
+        "criterion": {"const": "weighted-gini-purity/v1"},
+        "heldout_percent": {"type": "integer", "minimum": 1, "maximum": 50},
+        "leaf_policy": {"const": "majority-count-then-canonical-emission/v1"},
+        "max_depth": {"type": "integer", "minimum": 1, "maximum": 63},
+        "min_leaf": {"type": "integer", "minimum": 1, "maximum": 1000},
+        "split_algorithm": {"const": "sha256-seed-nul-word-mod-100/v1"},
+        "split_seed": {"type": "string", "pattern": "^[a-z][a-z0-9._:/-]{0,127}$"},
+        "tie_break": {"const": "offset-then-symbol-first-strict-improvement/v1"}
+      }
+    },
+    "model_shape": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maximum_steps", "nodes", "roots"],
+      "properties": {
+        "maximum_steps": {"type": "integer", "minimum": 1, "maximum": 64},
+        "nodes": {"type": "integer", "minimum": 1, "maximum": 500000},
+        "roots": {"type": "integer", "minimum": 1, "maximum": 28}
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["train", "heldout"],
+      "properties": {
+        "train": {"$ref": "#/$defs/metrics"},
+        "heldout": {"$ref": "#/$defs/metrics"}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"admission": {"const": "product-admitted"}}},
+      "then": {
+        "properties": {
+          "status": {"const": "product-admitted"},
+          "review_record_sha256": {"$ref": "#/$defs/sha256"}
+        }
+      },
+      "else": {
+        "properties": {
+          "status": {"const": "non-product-training-fixture"},
+          "review_record_sha256": {"type": "null"}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["words", "exact_words", "unresolved_words", "invalid_emission_words", "symbols", "exact_symbols", "segment_reference", "segment_edits", "segment_error_ppm"],
+      "properties": {
+        "words": {"type": "integer", "minimum": 1},
+        "exact_words": {"type": "integer", "minimum": 0},
+        "unresolved_words": {"type": "integer", "minimum": 0},
+        "invalid_emission_words": {"type": "integer", "minimum": 0},
+        "symbols": {"type": "integer", "minimum": 1},
+        "exact_symbols": {"type": "integer", "minimum": 0},
+        "segment_reference": {"type": "integer", "minimum": 1},
+        "segment_edits": {"type": "integer", "minimum": 0},
+        "segment_error_ppm": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

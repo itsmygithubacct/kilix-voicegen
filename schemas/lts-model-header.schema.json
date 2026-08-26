@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:kilix:voicegen:schema:lts-model-header:v1",
+  "title": "Kilix Voicegen compact LTS JSONL header",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "admission", "dialect", "resource_id", "segment_inventory_sha256", "source_lexicon_sha256", "training_record_sha256", "review_record_sha256", "context_left", "context_right", "maximum_steps", "node_count", "roots"],
+  "properties": {
+    "schema": {"const": "kilix.voicegen.lts-model/v1"},
+    "admission": {"enum": ["product-admitted", "local-user", "test-fixture"]},
+    "dialect": {"const": "en-AU"},
+    "resource_id": {"type": "string", "pattern": "^[a-z][a-z0-9._:/-]{0,127}$"},
+    "segment_inventory_sha256": {"$ref": "#/$defs/sha256"},
+    "source_lexicon_sha256": {"$ref": "#/$defs/sha256"},
+    "training_record_sha256": {"$ref": "#/$defs/sha256"},
+    "review_record_sha256": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "#/$defs/sha256"}
+      ]
+    },
+    "context_left": {"type": "integer", "minimum": 0, "maximum": 8},
+    "context_right": {"type": "integer", "minimum": 0, "maximum": 8},
+    "maximum_steps": {"type": "integer", "minimum": 1, "maximum": 64},
+    "node_count": {"type": "integer", "minimum": 1, "maximum": 500000},
+    "roots": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 28,
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[a-z'-]$": {"type": "integer", "minimum": 0, "maximum": 499999}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"admission": {"const": "product-admitted"}}},
+      "then": {
+        "properties": {
+          "review_record_sha256": {"$ref": "#/$defs/sha256"},
+          "roots": {"required": ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z"]}
+        }
+      },
+      "else": {"properties": {"review_record_sha256": {"type": "null"}}}
+    }
+  ],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

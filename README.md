@@ -12,14 +12,17 @@ repository provides the frozen C ABI draft, strict model-package verification,
 strict UTF-8/control validation, a typed lexical frontend trace, a native CLI,
 and a deterministic fixture engine. P1 implementation is active: the pinned
 utf8proc/Unicode 17 dependency now supplies NFC with original-byte spans, and the
-staged lexical/normalization vectors execute. Pronunciation resources, final
-model tokens, recording pilots, and neural inference remain open. A strict
+staged lexical/normalization vectors execute. Reviewed pronunciation data,
+final model tokens, recording pilots, and neural inference remain open. A strict
 pronunciation-resource ABI and native loader now bind canonical `en-AU` JSONL
 to caller-pinned file and segment-inventory hashes, enforce bounded NFC entries
 and role-qualified syllables, and require a separate review-record hash before a
 resource can be admitted as product data. No product lexicon has yet passed that
-human review gate. The fixture emits a quiet triangle-wave test signal so
-streaming, backpressure, cancellation, corruption handling, and language
+human review gate. A compact deterministic LTS decision-forest trainer and
+native inference loader now provide the corresponding offline fallback
+mechanism, but only first-party in-memory/test data have exercised it; no
+product LTS artifact exists. The fixture emits a quiet triangle-wave test signal
+so streaming, backpressure, cancellation, corruption handling, and language
 bindings can be tested without a model.
 
 The v1 frontend and model contract is fixed to `en-AU`; it has no automatic
@@ -106,6 +109,17 @@ Its loader accepts resource bytes rather than discovering files, verifies the
 whole-resource SHA-256 and canonical segment-ID inventory, keeps exact and
 ASCII-folded lookups separate, resolves role-qualified variants before defaults,
 and clears all loaded state on every validation failure.
+
+The compact LTS JSONL contract likewise binds the complete forest, canonical
+segment inventory, source lexicon, training record, and (for product admission)
+the separate review record. Its bounded native evaluator reconstructs segment,
+syllable, and stress records without filesystem or network discovery. The
+standard-library-only `tools/train_lts_cart.py` trains deterministic
+context-window CART-style forests from explicitly hash-pinned, letter-aligned
+JSONL; it records a SHA-256 word split and held-out exact-symbol, exact-word,
+and segment-edit metrics. Product mode additionally requires the exact source
+lexicon, alignment, license, and review evidence files—not only their claimed
+hash strings. Generated forests and reports remain outside this repository.
 
 `tools/build_en_au_lexicon_candidate.py` converts an explicitly hashed CMUdict
 snapshot into a deterministic candidate and Australian-review queue outside the

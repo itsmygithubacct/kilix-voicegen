@@ -85,6 +85,7 @@ kgv_sanitizers(kilix_voicegen_support)
 
 add_library(kilix_voicegen_frontend STATIC
   src/frontend/frontend.cpp
+  src/frontend/lts.cpp
   src/frontend/pipeline.cpp
   src/frontend/pronunciation.cpp)
 target_include_directories(kilix_voicegen_frontend PRIVATE
@@ -263,6 +264,15 @@ if(BUILD_TESTING)
   set_tests_properties(lexicon_candidate PROPERTIES ENVIRONMENT
     "${KGV_LEXICON_TEST_ENV}")
 
+  add_test(NAME lts_trainer
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lts_trainer.py")
+  set(KGV_LTS_TRAINER_TEST_ENV
+    "KGV_LTS_TRAINER=${CMAKE_CURRENT_SOURCE_DIR}/tools/train_lts_cart.py"
+    "KGV_LTS_VALIDATOR=$<TARGET_FILE:test_lts>"
+    "PYTHONDONTWRITEBYTECODE=1")
+  set_tests_properties(lts_trainer PROPERTIES ENVIRONMENT
+    "${KGV_LTS_TRAINER_TEST_ENV}")
+
   add_executable(test_frontend tests/test_frontend.cpp)
   target_link_libraries(test_frontend PRIVATE kilix_voicegen_frontend)
   target_include_directories(test_frontend PRIVATE
@@ -280,6 +290,15 @@ if(BUILD_TESTING)
   kgv_project_warnings(test_pronunciation)
   kgv_sanitizers(test_pronunciation)
   add_test(NAME pronunciation_resource COMMAND test_pronunciation)
+
+  add_executable(test_lts tests/test_lts.cpp)
+  target_link_libraries(test_lts PRIVATE kilix_voicegen_frontend)
+  target_include_directories(test_lts PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  kgv_project_warnings(test_lts)
+  kgv_sanitizers(test_lts)
+  add_test(NAME lts_resource COMMAND test_lts)
 
   if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT KGV_ENABLE_SANITIZERS)
     find_package(Threads REQUIRED)

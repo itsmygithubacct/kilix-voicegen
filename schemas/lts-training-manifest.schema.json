@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:kilix:voicegen:schema:lts-training-manifest:v1",
+  "title": "Kilix Voicegen compact LTS training output manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "status", "admission", "resource_id", "files"],
+  "properties": {
+    "schema": {"const": "kilix.voicegen.lts-training-manifest/v1"},
+    "status": {"enum": ["product-admitted", "non-product-training-fixture"]},
+    "admission": {"enum": ["product-admitted", "local-user", "test-fixture"]},
+    "resource_id": {"type": "string", "pattern": "^[a-z][a-z0-9._:/-]{0,127}$"},
+    "files": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["TRAINING.json", "model.jsonl"],
+      "properties": {
+        "TRAINING.json": {"$ref": "#/$defs/file"},
+        "model.jsonl": {"$ref": "#/$defs/file"}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"admission": {"const": "product-admitted"}}},
+      "then": {"properties": {"status": {"const": "product-admitted"}}},
+      "else": {"properties": {"status": {"const": "non-product-training-fixture"}}}
+    }
+  ],
+  "$defs": {
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bytes", "sha256"],
+      "properties": {
+        "bytes": {"type": "integer", "minimum": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    }
+  }
+}

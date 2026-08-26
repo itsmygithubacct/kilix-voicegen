@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:kilix:voicegen:schema:lts-node:v1",
+  "title": "Kilix Voicegen compact LTS JSONL node",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "id", "kind", "feature_offset", "feature_value", "yes", "no"],
+      "properties": {
+        "schema": {"const": "kilix.voicegen.lts-node/v1"},
+        "id": {"$ref": "#/$defs/node_id"},
+        "kind": {"const": "decision"},
+        "feature_offset": {"type": "integer", "minimum": -8, "maximum": 8, "not": {"const": 0}},
+        "feature_value": {"type": "string", "pattern": "^[a-z'^$-]$"},
+        "yes": {"$ref": "#/$defs/node_id"},
+        "no": {"$ref": "#/$defs/node_id"}
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "id", "kind", "emissions"],
+      "properties": {
+        "schema": {"const": "kilix.voicegen.lts-node/v1"},
+        "id": {"$ref": "#/$defs/node_id"},
+        "kind": {"const": "leaf"},
+        "emissions": {
+          "type": "array",
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["segment_ids", "syllable_end"],
+            "properties": {
+              "segment_ids": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 16,
+                "items": {"type": "integer", "minimum": 1, "maximum": 65535}
+              },
+              "syllable_end": {
+                "oneOf": [
+                  {"type": "null"},
+                  {"enum": ["none", "primary", "secondary"]}
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "node_id": {"type": "integer", "minimum": 0, "maximum": 499999}
+  }
+}
