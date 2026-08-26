@@ -44,7 +44,7 @@
       "properties": {
         "span": {"$ref": "#/$defs/span"},
         "source_kind": {"enum": ["LITERAL", "EXPANSION", "ALIAS", "SPELLING"]},
-        "pronunciation_source": {"enum": ["REQUEST_OVERRIDE", "USER_DICTIONARY", "PRODUCT_LEXICON", "BASE_LEXICON", "CONTEXT_RULE", "LTS", "SPELLING"]},
+        "pronunciation_source": {"enum": ["REQUEST_OVERRIDE", "USER_DICTIONARY", "PRODUCT_LEXICON", "BASE_LEXICON", "CONTEXT_RULE", "MORPHOLOGY", "LTS", "SPELLING"]},
         "syllables": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/syllable"}}
       }
     },

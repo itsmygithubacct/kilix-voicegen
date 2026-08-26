@@ -187,6 +187,38 @@ int validate_resources(const ResolvedFrontendResources &resources,
                           "product heteronym rules and lexicon lack one review binding");
         }
     }
+    if (resources.morphology_rules != nullptr) {
+        const MorphologyRules &rules = *resources.morphology_rules;
+        if (rules.resource_sha256().empty()) {
+            return reject(result, failure, KGV_INVALID_STATE,
+                          "FRONTEND_MORPHOLOGY_RULES_NOT_LOADED",
+                          "productive morphology rules are not loaded");
+        }
+        if (rules.admission() != resources.required_admission) {
+            return reject(result, failure, KGV_ABI_MISMATCH,
+                          "FRONTEND_MORPHOLOGY_ADMISSION_MISMATCH",
+                          "morphology rules do not share the base admission");
+        }
+        if (rules.base_lexicon_sha256() != lexicon.resource_sha256()) {
+            return reject(result, failure, KGV_ABI_MISMATCH,
+                          "FRONTEND_MORPHOLOGY_LEXICON_MISMATCH",
+                          "morphology rules target another base lexicon");
+        }
+        if (rules.segment_inventory_sha256() !=
+            lexicon.segment_inventory_sha256()) {
+            return reject(result, failure, KGV_ABI_MISMATCH,
+                          "FRONTEND_MORPHOLOGY_INVENTORY_MISMATCH",
+                          "morphology rules target another segment inventory");
+        }
+        if (resources.required_admission ==
+                PronunciationAdmission::product_admitted &&
+            rules.review_record_sha256() !=
+                lexicon.review_record_sha256()) {
+            return reject(result, failure, KGV_ABI_MISMATCH,
+                          "FRONTEND_MORPHOLOGY_REVIEW_MISMATCH",
+                          "product morphology rules and lexicon lack one review binding");
+        }
+    }
     if (lts.source_lexicon_sha256() != lexicon.resource_sha256()) {
         return reject(result, failure, KGV_ABI_MISMATCH,
                       "FRONTEND_LTS_LEXICON_MISMATCH",
@@ -285,6 +317,10 @@ int run_resolved_frontend(
     if (resources.heteronym_rules != nullptr) {
         result->heteronym_rules_sha256 =
             resources.heteronym_rules->resource_sha256();
+    }
+    if (resources.morphology_rules != nullptr) {
+        result->morphology_rules_sha256 =
+            resources.morphology_rules->resource_sha256();
     }
     result->pronunciation_lexicon_sha256 =
         resources.base_lexicon->resource_sha256();
@@ -420,33 +456,110 @@ int run_resolved_frontend(
                               resolved.request_override_index,
                               resolved.has_request_override);
             }
-            std::string key;
-            if (!lts_key(lexical_word.normalized, &key)) {
-                return reject(result, failure, KGV_INVALID_TEXT,
-                              "UNKNOWN_PRONUNCIATION",
-                              "word has no admitted lexicon or LTS pronunciation",
-                              lexical_word.span, index, true,
-                              resolved.request_override_index,
-                              resolved.has_request_override);
+            struct StemResolution final {
+                MorphologyKind kind =
+                    MorphologyKind::plural_or_possessive;
+                std::string stem;
+                const PronunciationEntry *entry = nullptr;
+                const PronunciationLexicon *lexicon = nullptr;
+            };
+            std::vector<StemResolution> stem_resolutions;
+            if (resources.morphology_rules != nullptr) {
+                for (const MorphologyCandidate &candidate :
+                     morphology_candidates(lexical_word.normalized)) {
+                    const PronunciationEntry *stem_entry = nullptr;
+                    const PronunciationLexicon *stem_lexicon = nullptr;
+                    if (resources.user_dictionary != nullptr) {
+                        stem_entry = resources.user_dictionary->find(
+                            candidate.stem, role);
+                        if (stem_entry != nullptr) {
+                            stem_lexicon = resources.user_dictionary;
+                        }
+                    }
+                    if (stem_entry == nullptr) {
+                        stem_entry = resources.base_lexicon->find(
+                            candidate.stem, role);
+                        if (stem_entry != nullptr) {
+                            stem_lexicon = resources.base_lexicon;
+                        }
+                    }
+                    if (stem_entry != nullptr) {
+                        stem_resolutions.push_back(StemResolution{
+                            candidate.kind, candidate.stem, stem_entry,
+                            stem_lexicon,
+                        });
+                    }
+                }
             }
-            LtsFailure lts_failure;
-            const int lts_status =
-                resources.lts->pronounce(key, &resolved.syllables, &lts_failure);
-            if (lts_status != KGV_OK) {
-                if (lts_status == KGV_INVALID_TEXT) {
-                    return reject(result, failure, KGV_INVALID_TEXT,
-                                  "UNKNOWN_PRONUNCIATION",
-                                  "word has no admitted lexicon or LTS pronunciation",
+            if (stem_resolutions.size() == 1U) {
+                const StemResolution &stem = stem_resolutions.front();
+                MorphologyApplyFailure morphology_failure;
+                const int morphology_status =
+                    resources.morphology_rules->apply(
+                        stem.kind, stem.entry->syllables,
+                        &resolved.syllables, &morphology_failure);
+                if (morphology_status != KGV_OK) {
+                    return reject(result, failure, morphology_status,
+                                  morphology_failure.code,
+                                  morphology_failure.message,
                                   lexical_word.span, index, true,
                                   resolved.request_override_index,
                                   resolved.has_request_override);
                 }
-                return reject(result, failure, lts_status, lts_failure.code,
-                              lts_failure.message, lexical_word.span, index,
-                              true, resolved.request_override_index,
-                              resolved.has_request_override);
+                resolved.pronunciation_source =
+                    ResolvedPronunciationSource::morphology;
+                resolved.has_morphology = true;
+                resolved.morphology_kind = stem.kind;
+                resolved.morphology_stem = stem.stem;
+                resolved.morphology_stem_source = lexicon_source(
+                    resources.required_admission, "WORD",
+                    stem.lexicon == resources.user_dictionary);
+                if (role != "default" &&
+                    !contains_role(*stem.entry, role)) {
+                    result->diagnostics.push_back(FrontendDiagnostic{
+                        "HETERONYM_DEFAULTED", "WARNING",
+                        lexical_word.span,
+                    });
+                }
+            } else {
+                if (stem_resolutions.size() > 1U) {
+                    result->diagnostics.push_back(FrontendDiagnostic{
+                        "MORPHOLOGY_AMBIGUOUS", "WARNING",
+                        lexical_word.span,
+                    });
+                }
+                std::string key;
+                if (!lts_key(lexical_word.normalized, &key)) {
+                    return reject(
+                        result, failure, KGV_INVALID_TEXT,
+                        "UNKNOWN_PRONUNCIATION",
+                        "word has no admitted lexicon or LTS pronunciation",
+                        lexical_word.span, index, true,
+                        resolved.request_override_index,
+                        resolved.has_request_override);
+                }
+                LtsFailure lts_failure;
+                const int lts_status = resources.lts->pronounce(
+                    key, &resolved.syllables, &lts_failure);
+                if (lts_status != KGV_OK) {
+                    if (lts_status == KGV_INVALID_TEXT) {
+                        return reject(
+                            result, failure, KGV_INVALID_TEXT,
+                            "UNKNOWN_PRONUNCIATION",
+                            "word has no admitted lexicon or LTS pronunciation",
+                            lexical_word.span, index, true,
+                            resolved.request_override_index,
+                            resolved.has_request_override);
+                    }
+                    return reject(
+                        result, failure, lts_status, lts_failure.code,
+                        lts_failure.message, lexical_word.span, index, true,
+                        resolved.request_override_index,
+                        resolved.has_request_override);
+                }
+                resolved.pronunciation_source =
+                    ResolvedPronunciationSource::lts;
             }
-            resolved.pronunciation_source = ResolvedPronunciationSource::lts;
         }
 
         ResolvedTokenWord token_word;
@@ -491,6 +604,7 @@ const char *resolved_pronunciation_source_name(
             return "BASE_LEXICON";
         case ResolvedPronunciationSource::product_lexicon:
             return "PRODUCT_LEXICON";
+        case ResolvedPronunciationSource::morphology: return "MORPHOLOGY";
         case ResolvedPronunciationSource::lts: return "LTS";
         case ResolvedPronunciationSource::spelling: return "SPELLING";
     }

@@ -26,7 +26,9 @@ void require(bool condition, std::string_view message) {
 
 const std::vector<kgv::SegmentDefinition> &segments() {
     static const std::vector<kgv::SegmentDefinition> value = {
-        {"K", 1U}, {"AE", 2U}, {"T", 3U}, {"B", 4U},
+        {"K", 1U},  {"AE", 2U}, {"T", 3U},  {"B", 4U},
+        {"S", 5U},  {"Z", 6U},  {"IH", 7U}, {"D", 8U},
+        {"NG", 9U}, {"SH", 10U},
     };
     return value;
 }
@@ -66,7 +68,7 @@ std::string pronunciation_fixture(
     std::string_view review) {
     std::string resource =
         "{\"admission\":\"" + admission_name(admission) +
-        "\",\"dialect\":\"en-AU\",\"entry_count\":9," +
+        "\",\"dialect\":\"en-AU\",\"entry_count\":14," +
         "\"resource_id\":\"kilix-en-au-resolution-lexicon-test-1\"," +
         "\"review_record_sha256\":" + review_json(review) +
         ",\"schema\":\"kilix.voicegen.pronunciation-lexicon/v1\"," +
@@ -100,7 +102,52 @@ std::string pronunciation_fixture(
     resource += pronunciation_entry(
         "lead", "[\"verb\"]",
         "[{\"segments\":[\"B\"],\"stress\":\"primary\"}]");
+    resource += pronunciation_entry(
+        "walk", "[\"default\"]",
+        "[{\"segments\":[\"B\",\"AE\",\"K\"],"
+        "\"stress\":\"primary\"}]");
+    resource += pronunciation_entry(
+        "walked", "[\"default\"]",
+        "[{\"segments\":[\"B\"],\"stress\":\"primary\"}]");
+    resource += pronunciation_entry(
+        "ax", "[\"default\"]",
+        "[{\"segments\":[\"AE\",\"K\",\"S\"],"
+        "\"stress\":\"primary\"}]");
+    resource += pronunciation_entry(
+        "axe", "[\"default\"]",
+        "[{\"segments\":[\"AE\",\"K\",\"Z\"],"
+        "\"stress\":\"primary\"}]");
+    resource += pronunciation_entry(
+        "records", "[\"noun\"]",
+        "[{\"segments\":[\"K\",\"Z\"],\"stress\":\"primary\"}]");
     return resource;
+}
+
+std::string morphology_fixture(
+    kgv::PronunciationAdmission admission,
+    std::string_view base_lexicon_sha256,
+    std::string_view inventory_sha256,
+    std::string_view review) {
+    return "{\"admission\":\"" + admission_name(admission) +
+           "\",\"base_lexicon_sha256\":\"" +
+           std::string(base_lexicon_sha256) +
+           "\",\"dialect\":\"en-AU\","
+           "\"past_syllabic_finals\":[\"T\",\"D\"],"
+           "\"past_syllabic_suffix\":[\"IH\",\"D\"],"
+           "\"past_unvoiced_finals\":[\"K\",\"S\",\"SH\"],"
+           "\"past_unvoiced_suffix\":[\"T\"],"
+           "\"past_voiced_suffix\":[\"D\"],"
+           "\"plural_sibilant_finals\":[\"S\",\"SH\"],"
+           "\"plural_sibilant_suffix\":[\"IH\",\"Z\"],"
+           "\"plural_unvoiced_finals\":[\"K\",\"T\"],"
+           "\"plural_unvoiced_suffix\":[\"S\"],"
+           "\"plural_voiced_suffix\":[\"Z\"],"
+           "\"progressive_suffix\":[\"IH\",\"NG\"],"
+           "\"resource_id\":\"kilix-en-au-resolution-morphology-test-1\","
+           "\"review_record_sha256\":" + review_json(review) +
+           ",\"schema\":\"kilix.voicegen.morphology-rules/v1\","
+           "\"segment_inventory_sha256\":\"" +
+           std::string(inventory_sha256) + "\"}\n";
 }
 
 std::string heteronym_rule(std::string_view id,
@@ -167,7 +214,7 @@ std::string user_dictionary_fixture(std::string_view inventory_sha256) {
 
 std::string lts_roots(bool product) {
     if (!product) {
-        return "{\"a\":0,\"b\":1,\"c\":2,\"t\":3}";
+        return "{\"a\":0,\"b\":1,\"c\":2,\"e\":0,\"s\":3,\"t\":3,\"x\":1}";
     }
     std::string roots = "{";
     for (char symbol = 'a'; symbol <= 'z'; ++symbol) {
@@ -241,7 +288,8 @@ std::string token_fixture(kgv::PronunciationAdmission admission,
                           std::size_t budget = 32U) {
     std::string resource =
         "{\"admission\":\"" + admission_name(admission) +
-        "\",\"dialect\":\"en-AU\",\"entry_count\":21," +
+        "\",\"dialect\":\"en-AU\",\"entry_count\":" +
+        std::to_string(controls().size() + segments().size()) + "," +
         "\"frontend_abi_sha256\":\"" +
         std::string(frontend_abi_sha256) +
         "\",\"maximum_input_tokens\":" + std::to_string(budget) +
@@ -267,11 +315,13 @@ struct LoadedResources final {
         kgv::PronunciationAdmission admission,
         const kgv::PronunciationLexicon *user_dictionary = nullptr,
         std::string_view frontend_abi = kFrontendAbi,
-        const kgv::HeteronymRules *heteronym_rules = nullptr) const {
+        const kgv::HeteronymRules *heteronym_rules = nullptr,
+        const kgv::MorphologyRules *morphology_rules = nullptr) const {
         kgv::ResolvedFrontendResources resources;
         resources.base_lexicon = &lexicon;
         resources.user_dictionary = user_dictionary;
         resources.heteronym_rules = heteronym_rules;
+        resources.morphology_rules = morphology_rules;
         resources.lts = &lts;
         resources.model_tokens = &tokens;
         resources.required_admission = admission;
@@ -293,6 +343,24 @@ kgv::HeteronymRules load_heteronyms(
                 resource, kgv::sha256_hex(resource), base_lexicon_sha256,
                 admission, &rules, &failure) == KGV_OK,
             "resolution heteronym fixture did not load");
+    return rules;
+}
+
+kgv::MorphologyRules load_morphology(
+    kgv::PronunciationAdmission admission,
+    std::string_view base_lexicon_sha256,
+    std::string_view review = {}) {
+    const std::string inventory_sha256 =
+        kgv::pronunciation_segment_inventory_sha256(segments());
+    const std::string resource = morphology_fixture(
+        admission, base_lexicon_sha256, inventory_sha256, review);
+    kgv::MorphologyRules rules;
+    kgv::MorphologyResourceFailure failure;
+    require(kgv::load_morphology_rules(
+                resource, kgv::sha256_hex(resource), base_lexicon_sha256,
+                inventory_sha256, admission, segments(), &rules,
+                &failure) == KGV_OK,
+            "resolution morphology fixture did not load");
     return rules;
 }
 
@@ -361,6 +429,7 @@ void require_cleared(const kgv::ResolvedFrontendResult &result) {
                 result.frontend_abi_sha256.empty() &&
                 result.user_dictionary_sha256.empty() &&
                 result.heteronym_rules_sha256.empty() &&
+                result.morphology_rules_sha256.empty() &&
                 result.pronunciation_lexicon_sha256.empty() &&
                 result.lts_sha256.empty() && result.words.empty() &&
                 result.phrases.empty() && result.diagnostics.empty() &&
@@ -430,6 +499,8 @@ void require_same(const kgv::ResolvedFrontendResult &left,
                     right.user_dictionary_sha256 &&
                 left.heteronym_rules_sha256 ==
                     right.heteronym_rules_sha256 &&
+                left.morphology_rules_sha256 ==
+                    right.morphology_rules_sha256 &&
                 left.pronunciation_lexicon_sha256 ==
                     right.pronunciation_lexicon_sha256 &&
                 left.lts_sha256 == right.lts_sha256 &&
@@ -447,6 +518,11 @@ void require_same(const kgv::ResolvedFrontendResult &left,
                     a.role_source == b.role_source &&
                     a.context_rule_id == b.context_rule_id &&
                     a.pronunciation_source == b.pronunciation_source &&
+                    a.has_morphology == b.has_morphology &&
+                    a.morphology_kind == b.morphology_kind &&
+                    a.morphology_stem == b.morphology_stem &&
+                    a.morphology_stem_source ==
+                        b.morphology_stem_source &&
                     a.request_override_kind == b.request_override_kind &&
                     a.request_override_index == b.request_override_index &&
                     a.has_request_override == b.has_request_override &&
@@ -670,6 +746,139 @@ int main() {
                         &failure) == KGV_OK,
                     "repeated typed phone override failed");
             require_same(request_overridden, repeated_request);
+        }
+
+        {
+            const kgv::MorphologyRules morphology_rules = load_morphology(
+                kgv::PronunciationAdmission::test_fixture,
+                loaded.lexicon.resource_sha256());
+            const kgv::ResolvedFrontendResources morphology_resources =
+                loaded.chain(kgv::PronunciationAdmission::test_fixture,
+                             nullptr, kFrontendAbi, nullptr,
+                             &morphology_rules);
+            kgv::ResolvedFrontendResult inflected;
+            const int morphology_status = kgv::run_resolved_frontend(
+                "cats walking walked axes.", KGV_PROFILE_PROSE,
+                morphology_resources, {}, &inflected, &failure);
+            if (morphology_status != KGV_OK) {
+                throw std::runtime_error(
+                    "valid productive morphology request was rejected: " +
+                    failure.code);
+            }
+            require(inflected.morphology_rules_sha256 ==
+                        morphology_rules.resource_sha256() &&
+                        inflected.words.size() == 4U &&
+                        inflected.words[0U].pronunciation_source ==
+                            kgv::ResolvedPronunciationSource::morphology &&
+                        inflected.words[0U].has_morphology &&
+                        inflected.words[0U].morphology_kind ==
+                            kgv::MorphologyKind::plural_or_possessive &&
+                        inflected.words[0U].morphology_stem == "cat" &&
+                        inflected.words[0U].morphology_stem_source ==
+                            kgv::ResolvedPronunciationSource::base_lexicon &&
+                        inflected.words[0U]
+                                .syllables[0U].segment_ids ==
+                            std::vector<std::uint16_t>({1U, 2U, 3U, 5U}),
+                    "plural morphology lost output or provenance");
+            require(inflected.words[1U].pronunciation_source ==
+                        kgv::ResolvedPronunciationSource::morphology &&
+                        inflected.words[1U].morphology_kind ==
+                            kgv::MorphologyKind::progressive &&
+                        inflected.words[1U].morphology_stem == "walk" &&
+                        inflected.words[1U].syllables.size() == 2U &&
+                        inflected.words[1U]
+                                .syllables[1U].stress ==
+                            kgv::SyllableStress::none &&
+                        inflected.words[1U]
+                                .syllables[1U].segment_ids ==
+                            std::vector<std::uint16_t>({7U, 9U}),
+                    "progressive morphology lost syllabification");
+            require(inflected.words[2U].pronunciation_source ==
+                        kgv::ResolvedPronunciationSource::base_lexicon &&
+                        !inflected.words[2U].has_morphology &&
+                        inflected.words[2U]
+                                .syllables[0U].segment_ids ==
+                            std::vector<std::uint16_t>({4U}),
+                    "whole-word lexicon did not precede morphology");
+            require(inflected.words[3U].pronunciation_source ==
+                        kgv::ResolvedPronunciationSource::lts &&
+                        !inflected.words[3U].has_morphology &&
+                        inflected.diagnostics.size() == 1U &&
+                        inflected.diagnostics[0U].code ==
+                            "MORPHOLOGY_AMBIGUOUS" &&
+                        std::string(kgv::resolved_pronunciation_source_name(
+                            inflected.words[0U].pronunciation_source)) ==
+                            "MORPHOLOGY",
+                    "ambiguous morphology did not fail closed to LTS");
+
+            const kgv::PronunciationLexicon user_dictionary =
+                load_user_dictionary(segments());
+            const kgv::ResolvedFrontendResources user_morphology_resources =
+                loaded.chain(kgv::PronunciationAdmission::test_fixture,
+                             &user_dictionary, kFrontendAbi, nullptr,
+                             &morphology_rules);
+            kgv::ResolvedFrontendResult user_inflected;
+            require(kgv::run_resolved_frontend(
+                        "cats.", KGV_PROFILE_PROSE,
+                        user_morphology_resources, {}, &user_inflected,
+                        &failure) == KGV_OK &&
+                        user_inflected.words.size() == 1U &&
+                        user_inflected.words[0U].has_morphology &&
+                        user_inflected.words[0U].morphology_stem_source ==
+                            kgv::ResolvedPronunciationSource::user_dictionary &&
+                        user_inflected.words[0U]
+                                .syllables[0U].segment_ids ==
+                            std::vector<std::uint16_t>({4U, 6U}),
+                    "user-dictionary stem did not precede base morphology");
+
+            kgv::RequestPronunciationOverride phone_override;
+            phone_override.span = kgv::SourceSpan{0U, 4U};
+            phone_override.kind =
+                kgv::RequestOverrideKind::phone_syllables;
+            phone_override.syllables = {{
+                kgv::SyllableStress::primary,
+                std::vector<std::uint16_t>({2U}),
+            }};
+            kgv::ResolvedFrontendResult phone_wins;
+            require(kgv::run_resolved_frontend(
+                        "cats.", KGV_PROFILE_PROSE,
+                        user_morphology_resources, {}, {phone_override},
+                        &phone_wins, &failure) == KGV_OK &&
+                        phone_wins.words.size() == 1U &&
+                        phone_wins.words[0U].pronunciation_source ==
+                            kgv::ResolvedPronunciationSource::request_override &&
+                        !phone_wins.words[0U].has_morphology,
+                    "phone override did not precede morphology");
+
+            kgv::RequestPronunciationOverride replacement_override;
+            replacement_override.span = kgv::SourceSpan{0U, 3U};
+            replacement_override.kind =
+                kgv::RequestOverrideKind::replacement_text;
+            replacement_override.replacement_text = "cats";
+            kgv::ResolvedFrontendResult replacement_reentered;
+            require(kgv::run_resolved_frontend(
+                        "cat.", KGV_PROFILE_PROSE, morphology_resources,
+                        {}, {replacement_override}, &replacement_reentered,
+                        &failure) == KGV_OK &&
+                        replacement_reentered.words.size() == 1U &&
+                        replacement_reentered.words[0U].normalized == "cats" &&
+                        replacement_reentered.words[0U].has_request_override &&
+                        replacement_reentered.words[0U].has_morphology &&
+                        replacement_reentered.words[0U].span.byte_start == 0U &&
+                        replacement_reentered.words[0U].span.byte_end == 3U,
+                    "replacement text did not re-enter morphology");
+
+            require_failure("records.", morphology_resources, {"verb"},
+                            KGV_INVALID_TEXT,
+                            "AMBIGUOUS_PRONUNCIATION_ROLE");
+
+            kgv::ResolvedFrontendResult repeated_morphology;
+            require(kgv::run_resolved_frontend(
+                        "cats walking walked axes.", KGV_PROFILE_PROSE,
+                        morphology_resources, {}, &repeated_morphology,
+                        &failure) == KGV_OK,
+                    "repeated morphology resolution failed");
+            require_same(inflected, repeated_morphology);
         }
 
         {
@@ -1088,7 +1297,7 @@ int main() {
         }
         {
             std::vector<kgv::SegmentDefinition> alternate_segments = segments();
-            alternate_segments.push_back({"D", 5U});
+            alternate_segments.push_back({"X", 11U});
             const kgv::PronunciationLexicon wrong_inventory =
                 load_user_dictionary(alternate_segments);
             kgv::ResolvedFrontendResources invalid = resources;
@@ -1146,6 +1355,56 @@ int main() {
                             "FRONTEND_HETERONYM_ROLE_MISMATCH");
         }
         {
+            kgv::MorphologyRules unloaded_rules;
+            kgv::ResolvedFrontendResources invalid = resources;
+            invalid.morphology_rules = &unloaded_rules;
+            require_failure("cat.", invalid, {}, KGV_INVALID_STATE,
+                            "FRONTEND_MORPHOLOGY_RULES_NOT_LOADED");
+        }
+        {
+            const kgv::MorphologyRules product_rules = load_morphology(
+                kgv::PronunciationAdmission::product_admitted,
+                loaded.lexicon.resource_sha256(), std::string(64U, 'c'));
+            kgv::ResolvedFrontendResources invalid = resources;
+            invalid.morphology_rules = &product_rules;
+            require_failure("cat.", invalid, {}, KGV_ABI_MISMATCH,
+                            "FRONTEND_MORPHOLOGY_ADMISSION_MISMATCH");
+        }
+        {
+            const kgv::MorphologyRules wrong_lexicon = load_morphology(
+                kgv::PronunciationAdmission::test_fixture,
+                std::string(64U, 'b'));
+            kgv::ResolvedFrontendResources invalid = resources;
+            invalid.morphology_rules = &wrong_lexicon;
+            require_failure("cat.", invalid, {}, KGV_ABI_MISMATCH,
+                            "FRONTEND_MORPHOLOGY_LEXICON_MISMATCH");
+        }
+        {
+            std::vector<kgv::SegmentDefinition> alternate_segments = segments();
+            alternate_segments.push_back({"X", 11U});
+            const std::string alternate_inventory_sha =
+                kgv::pronunciation_segment_inventory_sha256(
+                    alternate_segments);
+            const std::string rule_resource = morphology_fixture(
+                kgv::PronunciationAdmission::test_fixture,
+                loaded.lexicon.resource_sha256(), alternate_inventory_sha,
+                {});
+            kgv::MorphologyRules wrong_inventory;
+            kgv::MorphologyResourceFailure rule_failure;
+            require(kgv::load_morphology_rules(
+                        rule_resource, kgv::sha256_hex(rule_resource),
+                        loaded.lexicon.resource_sha256(),
+                        alternate_inventory_sha,
+                        kgv::PronunciationAdmission::test_fixture,
+                        alternate_segments, &wrong_inventory,
+                        &rule_failure) == KGV_OK,
+                    "alternate morphology inventory fixture did not load");
+            kgv::ResolvedFrontendResources invalid = resources;
+            invalid.morphology_rules = &wrong_inventory;
+            require_failure("cat.", invalid, {}, KGV_ABI_MISMATCH,
+                            "FRONTEND_MORPHOLOGY_INVENTORY_MISMATCH");
+        }
+        {
             const std::string review_a(64U, 'a');
             const std::string review_b(64U, 'b');
             const LoadedResources product = load_resources(
@@ -1174,6 +1433,23 @@ int main() {
                 "FRONTEND_HETERONYM_REVIEW_MISMATCH");
         }
         {
+            const std::string review_a(64U, 'a');
+            const std::string review_b(64U, 'b');
+            const LoadedResources product = load_resources(
+                kgv::PronunciationAdmission::product_admitted, review_a,
+                review_a);
+            const kgv::MorphologyRules mismatched_rules = load_morphology(
+                kgv::PronunciationAdmission::product_admitted,
+                product.lexicon.resource_sha256(), review_b);
+            require_failure(
+                "cat.",
+                product.chain(
+                    kgv::PronunciationAdmission::product_admitted, nullptr,
+                    kFrontendAbi, nullptr, &mismatched_rules),
+                {}, KGV_ABI_MISMATCH,
+                "FRONTEND_MORPHOLOGY_REVIEW_MISMATCH");
+        }
+        {
             const std::string review(64U, 'a');
             const LoadedResources product = load_resources(
                 kgv::PronunciationAdmission::product_admitted, review,
@@ -1192,6 +1468,24 @@ int main() {
                             kgv::ResolvedPronunciationSource::user_dictionary,
                     "local user dictionary was not admitted above a valid "
                     "product chain");
+
+            const kgv::MorphologyRules product_morphology = load_morphology(
+                kgv::PronunciationAdmission::product_admitted,
+                product.lexicon.resource_sha256(), review);
+            kgv::ResolvedFrontendResult product_inflected;
+            require(kgv::run_resolved_frontend(
+                        "cats.", KGV_PROFILE_PROSE,
+                        product.chain(
+                            kgv::PronunciationAdmission::product_admitted,
+                            nullptr, kFrontendAbi, nullptr,
+                            &product_morphology),
+                        {}, &product_inflected, &failure) == KGV_OK &&
+                        product_inflected.words.size() == 1U &&
+                        product_inflected.words[0U].pronunciation_source ==
+                            kgv::ResolvedPronunciationSource::morphology &&
+                        product_inflected.words[0U].morphology_stem_source ==
+                            kgv::ResolvedPronunciationSource::product_lexicon,
+                    "review-bound product morphology was not admitted");
         }
 
         std::mt19937_64 generator(0x4b47562d5245534fULL);

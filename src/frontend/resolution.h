@@ -9,6 +9,7 @@
 
 #include "frontend/heteronyms.h"
 #include "frontend/lts.h"
+#include "frontend/morphology.h"
 #include "frontend/overrides.h"
 #include "frontend/pipeline.h"
 #include "frontend/pronunciation.h"
@@ -21,6 +22,7 @@ enum class ResolvedPronunciationSource {
     user_dictionary,
     base_lexicon,
     product_lexicon,
+    morphology,
     lts,
     spelling,
 };
@@ -39,6 +41,12 @@ struct ResolvedFrontendWord final {
     std::string context_rule_id;
     ResolvedPronunciationSource pronunciation_source =
         ResolvedPronunciationSource::base_lexicon;
+    bool has_morphology = false;
+    MorphologyKind morphology_kind =
+        MorphologyKind::plural_or_possessive;
+    std::string morphology_stem;
+    ResolvedPronunciationSource morphology_stem_source =
+        ResolvedPronunciationSource::base_lexicon;
     RequestOverrideKind request_override_kind =
         RequestOverrideKind::replacement_text;
     std::size_t request_override_index = 0U;
@@ -51,6 +59,7 @@ struct ResolvedFrontendResources final {
     const PronunciationLexicon *base_lexicon = nullptr;
     const PronunciationLexicon *user_dictionary = nullptr;
     const HeteronymRules *heteronym_rules = nullptr;
+    const MorphologyRules *morphology_rules = nullptr;
     const LtsModel *lts = nullptr;
     const ModelTokenInventory *model_tokens = nullptr;
     PronunciationAdmission required_admission =
@@ -65,6 +74,7 @@ struct ResolvedFrontendResult final {
     std::string frontend_abi_sha256;
     std::string user_dictionary_sha256;
     std::string heteronym_rules_sha256;
+    std::string morphology_rules_sha256;
     std::string pronunciation_lexicon_sha256;
     std::string lts_sha256;
     std::vector<ResolvedFrontendWord> words;

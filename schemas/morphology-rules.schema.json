@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:kilix:voicegen:schema:morphology-rules:v1",
+  "title": "Kilix Voicegen productive morphology rules",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "admission", "dialect", "resource_id", "base_lexicon_sha256", "segment_inventory_sha256", "review_record_sha256", "plural_sibilant_finals", "plural_unvoiced_finals", "plural_sibilant_suffix", "plural_unvoiced_suffix", "plural_voiced_suffix", "past_syllabic_finals", "past_unvoiced_finals", "past_syllabic_suffix", "past_unvoiced_suffix", "past_voiced_suffix", "progressive_suffix"],
+  "properties": {
+    "schema": {"const": "kilix.voicegen.morphology-rules/v1"},
+    "admission": {"enum": ["product-admitted", "test-fixture"]},
+    "dialect": {"const": "en-AU"},
+    "resource_id": {"type": "string", "pattern": "^[a-z][a-z0-9._:/-]{0,127}$"},
+    "base_lexicon_sha256": {"$ref": "#/$defs/sha256"},
+    "segment_inventory_sha256": {"$ref": "#/$defs/sha256"},
+    "review_record_sha256": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "#/$defs/sha256"}
+      ]
+    },
+    "plural_sibilant_finals": {"$ref": "#/$defs/segmentClass"},
+    "plural_unvoiced_finals": {"$ref": "#/$defs/segmentClass"},
+    "plural_sibilant_suffix": {"$ref": "#/$defs/suffix"},
+    "plural_unvoiced_suffix": {"$ref": "#/$defs/suffix"},
+    "plural_voiced_suffix": {"$ref": "#/$defs/suffix"},
+    "past_syllabic_finals": {"$ref": "#/$defs/segmentClass"},
+    "past_unvoiced_finals": {"$ref": "#/$defs/segmentClass"},
+    "past_syllabic_suffix": {"$ref": "#/$defs/suffix"},
+    "past_unvoiced_suffix": {"$ref": "#/$defs/suffix"},
+    "past_voiced_suffix": {"$ref": "#/$defs/suffix"},
+    "progressive_suffix": {"$ref": "#/$defs/suffix"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"admission": {"const": "product-admitted"}}},
+      "then": {"properties": {"review_record_sha256": {"$ref": "#/$defs/sha256"}}},
+      "else": {"properties": {"review_record_sha256": {"type": "null"}}}
+    }
+  ],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "segment": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,31}$"},
+    "segmentClass": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/segment"}
+    },
+    "suffix": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/segment"}
+    }
+  }
+}

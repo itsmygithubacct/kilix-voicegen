@@ -163,6 +163,20 @@ hash, role source, and rule ID remain in the internal result. Current rules and
 tests are first-party synthetic fixtures; there is no product-admitted
 Australian rule table yet.
 
+An optional productive-morphology resource now sits after whole-word dictionary
+resolution and before LTS. It is bound to the exact base lexicon, segment
+inventory, admission class, and product review record. The bounded first-party
+mechanism proposes common plural/possessive `-s`, past `-ed`, and progressive
+`-ing` stems, but applies a suffix only when exactly one proposed stem resolves
+independently through the user or base lexicon. The resolved final segment
+selects the plural and past-tense allomorph; progressive `-ing` starts an
+unstressed suffix syllable. A whole-word entry always wins, unresolved known
+role variants remain errors, and multiple resolvable stems emit
+`MORPHOLOGY_AMBIGUOUS` before LTS. Resource hash, stem spelling, inflection kind,
+and stem source remain in the internal result. The rule table and tests are
+synthetic fixtures; no qualified Australian morphology resource has product
+admission yet.
+
 `tools/build_en_au_lexicon_candidate.py` converts an explicitly hashed CMUdict
 snapshot into a deterministic candidate and Australian-review queue outside the
 tree. Its output records both source and generator revisions/hashes, is
