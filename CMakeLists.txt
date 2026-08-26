@@ -92,7 +92,8 @@ add_library(kilix_voicegen_frontend STATIC
   src/frontend/pipeline.cpp
   src/frontend/pronunciation.cpp
   src/frontend/resolution.cpp
-  src/frontend/tokenization.cpp)
+  src/frontend/tokenization.cpp
+  src/frontend/weak_forms.cpp)
 target_include_directories(kilix_voicegen_frontend PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/include
   ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -322,6 +323,15 @@ if(BUILD_TESTING)
   kgv_project_warnings(test_morphology)
   kgv_sanitizers(test_morphology)
   add_test(NAME morphology_resource COMMAND test_morphology)
+
+  add_executable(test_weak_forms tests/test_weak_forms.cpp)
+  target_link_libraries(test_weak_forms PRIVATE kilix_voicegen_frontend)
+  target_include_directories(test_weak_forms PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  kgv_project_warnings(test_weak_forms)
+  kgv_sanitizers(test_weak_forms)
+  add_test(NAME weak_form_resource COMMAND test_weak_forms)
 
   add_executable(test_tokenization tests/test_tokenization.cpp)
   target_link_libraries(test_tokenization PRIVATE kilix_voicegen_frontend)

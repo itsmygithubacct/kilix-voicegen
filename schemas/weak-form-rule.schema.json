@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:kilix:voicegen:schema:weak-form-rule:v1",
+  "title": "Kilix Voicegen weak-form rule JSONL entry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "rule_id", "target", "role", "capitalization", "position", "next_segment", "source"],
+  "properties": {
+    "schema": {"const": "kilix.voicegen.weak-form-rule/v1"},
+    "rule_id": {"type": "string", "pattern": "^[a-z][a-z0-9._:/-]{0,127}$"},
+    "target": {"type": "string", "pattern": "^[a-z](?:[a-z]|['-](?=[a-z])){0,63}$"},
+    "role": {"type": "string", "pattern": "^(?!default$)[a-z][a-z0-9-]{0,31}$"},
+    "capitalization": {"enum": ["any", "lower", "title", "upper", "mixed"]},
+    "position": {"enum": ["any", "phrase-medial", "phrase-final", "single-word-phrase"]},
+    "next_segment": {"enum": ["any", "vowel", "non-vowel", "absent"]},
+    "source": {"type": "string", "pattern": "^[a-z][a-z0-9._:/-]{0,127}$"}
+  }
+}

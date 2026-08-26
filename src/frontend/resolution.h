@@ -14,6 +14,7 @@
 #include "frontend/pipeline.h"
 #include "frontend/pronunciation.h"
 #include "frontend/tokenization.h"
+#include "frontend/weak_forms.h"
 
 namespace kgv {
 
@@ -31,6 +32,7 @@ enum class ResolvedRoleSource {
     default_role,
     explicit_request,
     contextual_rule,
+    postlexical_rule,
 };
 
 struct ResolvedFrontendWord final {
@@ -39,6 +41,8 @@ struct ResolvedFrontendWord final {
     std::string role;
     ResolvedRoleSource role_source = ResolvedRoleSource::default_role;
     std::string context_rule_id;
+    bool has_weak_form = false;
+    std::string weak_form_rule_id;
     ResolvedPronunciationSource pronunciation_source =
         ResolvedPronunciationSource::base_lexicon;
     bool has_morphology = false;
@@ -60,6 +64,7 @@ struct ResolvedFrontendResources final {
     const PronunciationLexicon *user_dictionary = nullptr;
     const HeteronymRules *heteronym_rules = nullptr;
     const MorphologyRules *morphology_rules = nullptr;
+    const WeakFormRules *weak_form_rules = nullptr;
     const LtsModel *lts = nullptr;
     const ModelTokenInventory *model_tokens = nullptr;
     PronunciationAdmission required_admission =
@@ -75,6 +80,7 @@ struct ResolvedFrontendResult final {
     std::string user_dictionary_sha256;
     std::string heteronym_rules_sha256;
     std::string morphology_rules_sha256;
+    std::string weak_form_rules_sha256;
     std::string pronunciation_lexicon_sha256;
     std::string lts_sha256;
     std::vector<ResolvedFrontendWord> words;

@@ -131,10 +131,11 @@ paragraph/sentence/clause/comma boundaries in that order when a chunk is
 required, and marks both sides of a forced word-boundary continuation. No
 product inventory or final token IDs have yet been frozen.
 
-An internal resolved-frontend operation now joins the three resource types. It
-requires one admission class and segment inventory, binds the LTS model to the
-exact loaded lexicon and the token inventory to a caller-pinned frontend ABI,
-and requires product lexicon/LTS review hashes to agree. It resolves
+An internal resolved-frontend operation now joins the core resources and
+optional reviewed overlays. It requires one admission class and segment
+inventory, binds the LTS model to the exact loaded lexicon and the token
+inventory to a caller-pinned frontend ABI, and requires product lexicon/LTS
+review hashes to agree. It resolves
 role-qualified lexicon entries before LTS, retains per-word provenance, and
 feeds the result directly into bounded token packing with no partial output on
 failure. A known grapheme with unresolved role variants fails as ambiguous
@@ -176,6 +177,21 @@ role variants remain errors, and multiple resolvable stems emit
 and stem source remain in the internal result. The rule table and tests are
 synthetic fixtures; no qualified Australian morphology resource has product
 admission yet.
+
+An optional weak-form JSONL resource now performs the first bounded
+postlexical selection after all words have pronunciations and before model-token
+packing. It binds the exact base lexicon, segment inventory, admission class,
+vowel segment class, and product review record. Rules name an existing reviewed
+lexicon role and may match capitalization, phrase position, and whether the next
+resolved segment is a vowel, a non-vowel, or absent. This makes contexts such as
+`the hour` depend on phones rather than the next written character and prevents
+lookahead across a phrase boundary. Only an unmodified base/product-lexicon
+default is eligible: a typed phone override, explicit role, local dictionary,
+morphology, LTS, or spelling result is never rewritten. Exactly one match is
+required; overlap emits `WEAK_FORM_RULE_AMBIGUOUS` and retains the strong
+default. Resource hash, selected role source, and rule ID remain in the internal
+result. Current pronunciations and rules are synthetic fixtures; no
+product-admitted Australian weak-form table exists yet.
 
 `tools/build_en_au_lexicon_candidate.py` converts an explicitly hashed CMUdict
 snapshot into a deterministic candidate and Australian-review queue outside the

@@ -219,6 +219,43 @@ int validate_resources(const ResolvedFrontendResources &resources,
                           "product morphology rules and lexicon lack one review binding");
         }
     }
+    if (resources.weak_form_rules != nullptr) {
+        const WeakFormRules &rules = *resources.weak_form_rules;
+        if (rules.resource_sha256().empty()) {
+            return reject(result, failure, KGV_INVALID_STATE,
+                          "FRONTEND_WEAK_FORM_RULES_NOT_LOADED",
+                          "weak-form rules are not loaded");
+        }
+        if (rules.admission() != resources.required_admission) {
+            return reject(result, failure, KGV_ABI_MISMATCH,
+                          "FRONTEND_WEAK_FORM_ADMISSION_MISMATCH",
+                          "weak-form rules do not share the base admission");
+        }
+        if (rules.base_lexicon_sha256() != lexicon.resource_sha256()) {
+            return reject(result, failure, KGV_ABI_MISMATCH,
+                          "FRONTEND_WEAK_FORM_LEXICON_MISMATCH",
+                          "weak-form rules target another base lexicon");
+        }
+        if (rules.segment_inventory_sha256() !=
+            lexicon.segment_inventory_sha256()) {
+            return reject(result, failure, KGV_ABI_MISMATCH,
+                          "FRONTEND_WEAK_FORM_INVENTORY_MISMATCH",
+                          "weak-form rules target another segment inventory");
+        }
+        if (!rules.compatible_with(lexicon)) {
+            return reject(result, failure, KGV_ABI_MISMATCH,
+                          "FRONTEND_WEAK_FORM_ROLE_MISMATCH",
+                          "weak-form rules lack exact default and output roles in the base lexicon");
+        }
+        if (resources.required_admission ==
+                PronunciationAdmission::product_admitted &&
+            rules.review_record_sha256() !=
+                lexicon.review_record_sha256()) {
+            return reject(result, failure, KGV_ABI_MISMATCH,
+                          "FRONTEND_WEAK_FORM_REVIEW_MISMATCH",
+                          "product weak-form rules and lexicon lack one review binding");
+        }
+    }
     if (lts.source_lexicon_sha256() != lexicon.resource_sha256()) {
         return reject(result, failure, KGV_ABI_MISMATCH,
                       "FRONTEND_LTS_LEXICON_MISMATCH",
@@ -322,14 +359,16 @@ int run_resolved_frontend(
         result->morphology_rules_sha256 =
             resources.morphology_rules->resource_sha256();
     }
+    if (resources.weak_form_rules != nullptr) {
+        result->weak_form_rules_sha256 =
+            resources.weak_form_rules->resource_sha256();
+    }
     result->pronunciation_lexicon_sha256 =
         resources.base_lexicon->resource_sha256();
     result->lts_sha256 = resources.lts->resource_sha256();
     result->diagnostics = lexical.diagnostics;
     result->words.reserve(lexical.words.size());
 
-    std::vector<ResolvedTokenWord> token_words;
-    token_words.reserve(lexical.words.size());
     for (std::size_t index = 0U; index < lexical.words.size(); ++index) {
         const LexicalWord &lexical_word = lexical.words[index];
         const bool explicit_role =
@@ -562,11 +601,90 @@ int run_resolved_frontend(
             }
         }
 
+        result->words.push_back(std::move(resolved));
+    }
+
+    if (resources.weak_form_rules != nullptr) {
+        std::vector<FrontendDiagnostic> weak_form_diagnostics;
+        // Resolve right-to-left so a rule sees the following word's final
+        // postlexical pronunciation, while retaining diagnostics in word order.
+        for (std::size_t cursor = result->words.size(); cursor > 0U;
+             --cursor) {
+            const std::size_t index = cursor - 1U;
+            ResolvedFrontendWord &resolved = result->words[index];
+            const bool base_pronunciation =
+                resolved.pronunciation_source ==
+                    ResolvedPronunciationSource::base_lexicon ||
+                resolved.pronunciation_source ==
+                    ResolvedPronunciationSource::product_lexicon;
+            if (!base_pronunciation ||
+                resolved.role_source != ResolvedRoleSource::default_role ||
+                resolved.role != "default") {
+                continue;
+            }
+            const std::size_t phrase_start = clause_bounds[index].first;
+            const std::size_t phrase_end = clause_bounds[index].second;
+            const bool has_next_segment = index + 1U < phrase_end;
+            std::uint16_t next_segment_id = 0U;
+            if (has_next_segment) {
+                const ResolvedFrontendWord &next = result->words[index + 1U];
+                if (next.syllables.empty() ||
+                    next.syllables.front().segment_ids.empty()) {
+                    return reject(
+                        result, failure, KGV_INVALID_STATE,
+                        "FRONTEND_WEAK_FORM_CONTEXT_INVALID",
+                        "weak-form context lacks a next pronounced segment",
+                        resolved.span, index, true,
+                        resolved.request_override_index,
+                        resolved.has_request_override);
+                }
+                next_segment_id =
+                    next.syllables.front().segment_ids.front();
+            }
+            const WeakFormDecision decision =
+                resources.weak_form_rules->decide(
+                    resolved.normalized, index, phrase_start, phrase_end,
+                    has_next_segment, next_segment_id);
+            if (decision.kind == WeakFormDecisionKind::ambiguous) {
+                weak_form_diagnostics.push_back(FrontendDiagnostic{
+                    "WEAK_FORM_RULE_AMBIGUOUS", "WARNING", resolved.span,
+                });
+                continue;
+            }
+            if (decision.kind != WeakFormDecisionKind::matched) {
+                continue;
+            }
+            const PronunciationEntry *entry = resources.base_lexicon->find(
+                resolved.normalized, decision.role);
+            if (entry == nullptr || !contains_role(*entry, decision.role)) {
+                return reject(
+                    result, failure, KGV_INVALID_STATE,
+                    "FRONTEND_WEAK_FORM_ROLE_UNAVAILABLE",
+                    "selected weak-form role is unavailable in the bound lexicon",
+                    resolved.span, index, true,
+                    resolved.request_override_index,
+                    resolved.has_request_override);
+            }
+            resolved.syllables = entry->syllables;
+            resolved.role = decision.role;
+            resolved.role_source = ResolvedRoleSource::postlexical_rule;
+            resolved.has_weak_form = true;
+            resolved.weak_form_rule_id = decision.rule_id;
+        }
+        std::reverse(weak_form_diagnostics.begin(),
+                     weak_form_diagnostics.end());
+        result->diagnostics.insert(result->diagnostics.end(),
+                                   weak_form_diagnostics.begin(),
+                                   weak_form_diagnostics.end());
+    }
+
+    std::vector<ResolvedTokenWord> token_words;
+    token_words.reserve(result->words.size());
+    for (const ResolvedFrontendWord &resolved : result->words) {
         ResolvedTokenWord token_word;
         token_word.span = resolved.span;
         token_word.syllables = resolved.syllables;
         token_words.push_back(std::move(token_word));
-        result->words.push_back(std::move(resolved));
     }
 
     result->phrases.reserve(lexical.phrases.size());
@@ -616,6 +734,7 @@ const char *resolved_role_source_name(ResolvedRoleSource value) noexcept {
         case ResolvedRoleSource::default_role: return "DEFAULT";
         case ResolvedRoleSource::explicit_request: return "EXPLICIT_REQUEST";
         case ResolvedRoleSource::contextual_rule: return "CONTEXTUAL_RULE";
+        case ResolvedRoleSource::postlexical_rule: return "POSTLEXICAL_RULE";
     }
     return "UNKNOWN";
 }

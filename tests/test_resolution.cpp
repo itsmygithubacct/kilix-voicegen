@@ -68,7 +68,7 @@ std::string pronunciation_fixture(
     std::string_view review) {
     std::string resource =
         "{\"admission\":\"" + admission_name(admission) +
-        "\",\"dialect\":\"en-AU\",\"entry_count\":14," +
+        "\",\"dialect\":\"en-AU\",\"entry_count\":25," +
         "\"resource_id\":\"kilix-en-au-resolution-lexicon-test-1\"," +
         "\"review_record_sha256\":" + review_json(review) +
         ",\"schema\":\"kilix.voicegen.pronunciation-lexicon/v1\"," +
@@ -120,6 +120,39 @@ std::string pronunciation_fixture(
     resource += pronunciation_entry(
         "records", "[\"noun\"]",
         "[{\"segments\":[\"K\",\"Z\"],\"stress\":\"primary\"}]");
+    resource += pronunciation_entry(
+        "a", "[\"weak\"]",
+        "[{\"segments\":[\"IH\"],\"stress\":\"none\"}]");
+    resource += pronunciation_entry(
+        "an", "[\"default\"]",
+        "[{\"segments\":[\"AE\",\"NG\"],\"stress\":\"none\"}]");
+    resource += pronunciation_entry(
+        "an", "[\"weak\"]",
+        "[{\"segments\":[\"IH\",\"NG\"],\"stress\":\"none\"}]");
+    resource += pronunciation_entry(
+        "hour", "[\"default\"]",
+        "[{\"segments\":[\"AE\"],\"stress\":\"primary\"}]");
+    resource += pronunciation_entry(
+        "one", "[\"default\"]",
+        "[{\"segments\":[\"K\"],\"stress\":\"primary\"}]");
+    resource += pronunciation_entry(
+        "the", "[\"default\"]",
+        "[{\"segments\":[\"D\",\"AE\"],\"stress\":\"primary\"}]");
+    resource += pronunciation_entry(
+        "the", "[\"weak-consonant\"]",
+        "[{\"segments\":[\"D\"],\"stress\":\"none\"}]");
+    resource += pronunciation_entry(
+        "the", "[\"weak-vowel\"]",
+        "[{\"segments\":[\"D\",\"IH\"],\"stress\":\"none\"}]");
+    resource += pronunciation_entry(
+        "to", "[\"default\"]",
+        "[{\"segments\":[\"T\",\"AE\"],\"stress\":\"primary\"}]");
+    resource += pronunciation_entry(
+        "to", "[\"weak-consonant\"]",
+        "[{\"segments\":[\"T\"],\"stress\":\"none\"}]");
+    resource += pronunciation_entry(
+        "to", "[\"weak-vowel\"]",
+        "[{\"segments\":[\"T\",\"IH\"],\"stress\":\"none\"}]");
     return resource;
 }
 
@@ -191,10 +224,59 @@ std::string heteronym_fixture(
     return resource;
 }
 
+std::string weak_form_rule(std::string_view id,
+                           std::string_view target,
+                           std::string_view role,
+                           std::string_view next_segment) {
+    return "{\"capitalization\":\"any\",\"next_segment\":\"" +
+           std::string(next_segment) +
+           "\",\"position\":\"phrase-medial\",\"role\":\"" +
+           std::string(role) + "\",\"rule_id\":\"" + std::string(id) +
+           "\",\"schema\":\"kilix.voicegen.weak-form-rule/v1\"," +
+           "\"source\":\"project-test-fixture\",\"target\":\"" +
+           std::string(target) + "\"}\n";
+}
+
+std::string weak_form_fixture(
+    kgv::PronunciationAdmission admission,
+    std::string_view base_lexicon_sha256,
+    std::string_view inventory_sha256,
+    std::string_view review,
+    bool ambiguous = false) {
+    const std::size_t entry_count = ambiguous ? 7U : 6U;
+    std::string resource =
+        "{\"admission\":\"" + admission_name(admission) +
+        "\",\"base_lexicon_sha256\":\"" +
+        std::string(base_lexicon_sha256) +
+        "\",\"dialect\":\"en-AU\",\"entry_count\":" +
+        std::to_string(entry_count) +
+        ",\"resource_id\":\"kilix-en-au-resolution-weak-forms-test-1\"," +
+        "\"review_record_sha256\":" + review_json(review) +
+        ",\"schema\":\"kilix.voicegen.weak-form-rules/v1\"," +
+        "\"segment_inventory_sha256\":\"" +
+        std::string(inventory_sha256) +
+        "\",\"vowel_segments\":[\"AE\",\"IH\"]}\n";
+    resource += weak_form_rule("fixture.a.medial", "a", "weak", "any");
+    resource += weak_form_rule("fixture.an.medial", "an", "weak", "any");
+    resource += weak_form_rule("fixture.the.before-consonant", "the",
+                               "weak-consonant", "non-vowel");
+    resource += weak_form_rule("fixture.the.before-vowel", "the",
+                               "weak-vowel", "vowel");
+    if (ambiguous) {
+        resource += weak_form_rule("fixture.the.medial", "the",
+                                   "weak-consonant", "any");
+    }
+    resource += weak_form_rule("fixture.to.before-consonant", "to",
+                               "weak-consonant", "non-vowel");
+    resource += weak_form_rule("fixture.to.before-vowel", "to",
+                               "weak-vowel", "vowel");
+    return resource;
+}
+
 std::string user_dictionary_fixture(std::string_view inventory_sha256) {
     std::string resource =
         "{\"admission\":\"local-user\",\"dialect\":\"en-AU\","
-        "\"entry_count\":3,"
+        "\"entry_count\":4,"
         "\"resource_id\":\"kilix-en-au-resolution-user-dictionary-test-1\","
         "\"review_record_sha256\":null,"
         "\"schema\":\"kilix.voicegen.pronunciation-lexicon/v1\","
@@ -209,6 +291,9 @@ std::string user_dictionary_fixture(std::string_view inventory_sha256) {
     resource += pronunciation_entry(
         "bat", "[\"noun\"]",
         "[{\"segments\":[\"K\"],\"stress\":\"primary\"}]");
+    resource += pronunciation_entry(
+        "the", "[\"default\"]",
+        "[{\"segments\":[\"B\"],\"stress\":\"primary\"}]");
     return resource;
 }
 
@@ -316,12 +401,14 @@ struct LoadedResources final {
         const kgv::PronunciationLexicon *user_dictionary = nullptr,
         std::string_view frontend_abi = kFrontendAbi,
         const kgv::HeteronymRules *heteronym_rules = nullptr,
-        const kgv::MorphologyRules *morphology_rules = nullptr) const {
+        const kgv::MorphologyRules *morphology_rules = nullptr,
+        const kgv::WeakFormRules *weak_form_rules = nullptr) const {
         kgv::ResolvedFrontendResources resources;
         resources.base_lexicon = &lexicon;
         resources.user_dictionary = user_dictionary;
         resources.heteronym_rules = heteronym_rules;
         resources.morphology_rules = morphology_rules;
+        resources.weak_form_rules = weak_form_rules;
         resources.lts = &lts;
         resources.model_tokens = &tokens;
         resources.required_admission = admission;
@@ -361,6 +448,28 @@ kgv::MorphologyRules load_morphology(
                 inventory_sha256, admission, segments(), &rules,
                 &failure) == KGV_OK,
             "resolution morphology fixture did not load");
+    return rules;
+}
+
+kgv::WeakFormRules load_weak_forms(
+    kgv::PronunciationAdmission admission,
+    std::string_view base_lexicon_sha256,
+    std::string_view review = {},
+    bool ambiguous = false,
+    std::string_view inventory_sha256 = {}) {
+    const std::string actual_inventory =
+        inventory_sha256.empty()
+            ? kgv::pronunciation_segment_inventory_sha256(segments())
+            : std::string(inventory_sha256);
+    const std::string resource = weak_form_fixture(
+        admission, base_lexicon_sha256, actual_inventory, review, ambiguous);
+    kgv::WeakFormRules rules;
+    kgv::WeakFormResourceFailure failure;
+    require(kgv::load_weak_form_rules(
+                resource, kgv::sha256_hex(resource), base_lexicon_sha256,
+                actual_inventory, admission, segments(), &rules,
+                &failure) == KGV_OK,
+            "resolution weak-form fixture did not load");
     return rules;
 }
 
@@ -430,6 +539,7 @@ void require_cleared(const kgv::ResolvedFrontendResult &result) {
                 result.user_dictionary_sha256.empty() &&
                 result.heteronym_rules_sha256.empty() &&
                 result.morphology_rules_sha256.empty() &&
+                result.weak_form_rules_sha256.empty() &&
                 result.pronunciation_lexicon_sha256.empty() &&
                 result.lts_sha256.empty() && result.words.empty() &&
                 result.phrases.empty() && result.diagnostics.empty() &&
@@ -501,6 +611,8 @@ void require_same(const kgv::ResolvedFrontendResult &left,
                     right.heteronym_rules_sha256 &&
                 left.morphology_rules_sha256 ==
                     right.morphology_rules_sha256 &&
+                left.weak_form_rules_sha256 ==
+                    right.weak_form_rules_sha256 &&
                 left.pronunciation_lexicon_sha256 ==
                     right.pronunciation_lexicon_sha256 &&
                 left.lts_sha256 == right.lts_sha256 &&
@@ -517,6 +629,8 @@ void require_same(const kgv::ResolvedFrontendResult &left,
                     a.source_kind == b.source_kind && a.role == b.role &&
                     a.role_source == b.role_source &&
                     a.context_rule_id == b.context_rule_id &&
+                    a.has_weak_form == b.has_weak_form &&
+                    a.weak_form_rule_id == b.weak_form_rule_id &&
                     a.pronunciation_source == b.pronunciation_source &&
                     a.has_morphology == b.has_morphology &&
                     a.morphology_kind == b.morphology_kind &&
@@ -1037,6 +1151,213 @@ int main() {
         }
 
         {
+            const kgv::WeakFormRules weak_form_rules = load_weak_forms(
+                kgv::PronunciationAdmission::test_fixture,
+                loaded.lexicon.resource_sha256());
+            const kgv::ResolvedFrontendResources weak_form_resources =
+                loaded.chain(kgv::PronunciationAdmission::test_fixture,
+                             nullptr, kFrontendAbi, nullptr, nullptr,
+                             &weak_form_rules);
+            constexpr std::string_view weak_form_text =
+                "the hour the one to hour to cat a cat an cat the.";
+            kgv::ResolvedFrontendResult selected;
+            require(kgv::run_resolved_frontend(
+                        weak_form_text, KGV_PROFILE_PROSE,
+                        weak_form_resources, {}, &selected,
+                        &failure) == KGV_OK &&
+                        selected.weak_form_rules_sha256 ==
+                            weak_form_rules.resource_sha256() &&
+                        selected.words.size() == 13U &&
+                        selected.diagnostics.empty(),
+                    "valid weak-form request was rejected");
+            require(selected.words[0U].has_weak_form &&
+                        selected.words[0U].role == "weak-vowel" &&
+                        selected.words[0U].role_source ==
+                            kgv::ResolvedRoleSource::postlexical_rule &&
+                        selected.words[0U].weak_form_rule_id ==
+                            "fixture.the.before-vowel" &&
+                        selected.words[0U]
+                                .syllables[0U].segment_ids ==
+                            std::vector<std::uint16_t>({8U, 7U}) &&
+                        selected.words[2U].role == "weak-consonant" &&
+                        selected.words[2U].weak_form_rule_id ==
+                            "fixture.the.before-consonant" &&
+                        selected.words[2U]
+                                .syllables[0U].segment_ids ==
+                            std::vector<std::uint16_t>({8U}),
+                    "the did not inspect the next pronounced segment");
+            require(selected.words[4U].role == "weak-vowel" &&
+                        selected.words[4U]
+                                .syllables[0U].segment_ids ==
+                            std::vector<std::uint16_t>({3U, 7U}) &&
+                        selected.words[6U].role == "weak-consonant" &&
+                        selected.words[6U]
+                                .syllables[0U].segment_ids ==
+                            std::vector<std::uint16_t>({3U}) &&
+                        selected.words[8U].role == "weak" &&
+                        selected.words[8U]
+                                .syllables[0U].segment_ids ==
+                            std::vector<std::uint16_t>({7U}) &&
+                        selected.words[10U].role == "weak" &&
+                        selected.words[10U]
+                                .syllables[0U].segment_ids ==
+                            std::vector<std::uint16_t>({7U, 9U}),
+                    "documented function-word weak forms changed");
+            require(!selected.words[12U].has_weak_form &&
+                        selected.words[12U].role == "default" &&
+                        selected.words[12U].role_source ==
+                            kgv::ResolvedRoleSource::default_role &&
+                        selected.words[12U].weak_form_rule_id.empty() &&
+                        selected.words[12U]
+                                .syllables[0U].segment_ids ==
+                            std::vector<std::uint16_t>({8U, 2U}) &&
+                        std::string(kgv::resolved_role_source_name(
+                            selected.words[0U].role_source)) ==
+                            "POSTLEXICAL_RULE",
+                    "phrase-final strong form or weak-form provenance changed");
+
+            kgv::ResolvedFrontendResult across_boundary;
+            require(kgv::run_resolved_frontend(
+                        "the. hour.", KGV_PROFILE_PROSE,
+                        weak_form_resources, {}, &across_boundary,
+                        &failure) == KGV_OK &&
+                        across_boundary.words.size() == 2U &&
+                        !across_boundary.words[0U].has_weak_form &&
+                        across_boundary.words[0U]
+                                .syllables[0U].segment_ids ==
+                            std::vector<std::uint16_t>({8U, 2U}),
+                    "weak-form lookahead crossed a phrase boundary");
+
+            kgv::ResolvedFrontendResult explicit_role;
+            require(kgv::run_resolved_frontend(
+                        "the hour.", KGV_PROFILE_PROSE,
+                        weak_form_resources, {"default", ""},
+                        &explicit_role, &failure) == KGV_OK &&
+                        explicit_role.words[0U].role_source ==
+                            kgv::ResolvedRoleSource::explicit_request &&
+                        !explicit_role.words[0U].has_weak_form &&
+                        explicit_role.words[0U]
+                                .syllables[0U].segment_ids ==
+                            std::vector<std::uint16_t>({8U, 2U}),
+                    "explicit role did not precede weak-form selection");
+
+            kgv::RequestPronunciationOverride target_phone;
+            target_phone.span = kgv::SourceSpan{0U, 3U};
+            target_phone.kind =
+                kgv::RequestOverrideKind::phone_syllables;
+            target_phone.syllables = {{
+                kgv::SyllableStress::primary,
+                std::vector<std::uint16_t>({5U}),
+            }};
+            kgv::ResolvedFrontendResult phone_wins;
+            require(kgv::run_resolved_frontend(
+                        "the hour.", KGV_PROFILE_PROSE,
+                        weak_form_resources, {}, {target_phone},
+                        &phone_wins, &failure) == KGV_OK &&
+                        phone_wins.words[0U].pronunciation_source ==
+                            kgv::ResolvedPronunciationSource::request_override &&
+                        !phone_wins.words[0U].has_weak_form &&
+                        phone_wins.words[0U]
+                                .syllables[0U].segment_ids ==
+                            std::vector<std::uint16_t>({5U}),
+                    "phone override did not precede weak-form selection");
+
+            const kgv::PronunciationLexicon user_dictionary =
+                load_user_dictionary(segments());
+            const kgv::ResolvedFrontendResources user_weak_forms =
+                loaded.chain(kgv::PronunciationAdmission::test_fixture,
+                             &user_dictionary, kFrontendAbi, nullptr, nullptr,
+                             &weak_form_rules);
+            kgv::ResolvedFrontendResult user_wins;
+            require(kgv::run_resolved_frontend(
+                        "the hour.", KGV_PROFILE_PROSE, user_weak_forms, {},
+                        &user_wins, &failure) == KGV_OK &&
+                        user_wins.words[0U].pronunciation_source ==
+                            kgv::ResolvedPronunciationSource::user_dictionary &&
+                        !user_wins.words[0U].has_weak_form &&
+                        user_wins.words[0U]
+                                .syllables[0U].segment_ids ==
+                            std::vector<std::uint16_t>({4U}),
+                    "user dictionary did not precede weak-form selection");
+
+            kgv::RequestPronunciationOverride next_phone;
+            next_phone.span = kgv::SourceSpan{4U, 8U};
+            next_phone.kind = kgv::RequestOverrideKind::phone_syllables;
+            next_phone.syllables = {{
+                kgv::SyllableStress::primary,
+                std::vector<std::uint16_t>({1U}),
+            }};
+            kgv::ResolvedFrontendResult pronounced_context;
+            require(kgv::run_resolved_frontend(
+                        "the hour.", KGV_PROFILE_PROSE,
+                        weak_form_resources, {}, {next_phone},
+                        &pronounced_context, &failure) == KGV_OK &&
+                        pronounced_context.words[0U].role ==
+                            "weak-consonant" &&
+                        pronounced_context.words[0U]
+                                .syllables[0U].segment_ids ==
+                            std::vector<std::uint16_t>({8U}),
+                    "weak form inspected spelling instead of overridden phones");
+
+            kgv::RequestPronunciationOverride replacement;
+            replacement.span = kgv::SourceSpan{0U, 3U};
+            replacement.kind =
+                kgv::RequestOverrideKind::replacement_text;
+            replacement.replacement_text = "the";
+            kgv::ResolvedFrontendResult replaced;
+            require(kgv::run_resolved_frontend(
+                        "cat hour.", KGV_PROFILE_PROSE,
+                        weak_form_resources, {}, {replacement}, &replaced,
+                        &failure) == KGV_OK &&
+                        replaced.words[0U].normalized == "the" &&
+                        replaced.words[0U].has_request_override &&
+                        replaced.words[0U].has_weak_form &&
+                        replaced.words[0U].role == "weak-vowel",
+                    "replacement text did not re-enter weak-form selection");
+
+            const kgv::WeakFormRules ambiguous_rules = load_weak_forms(
+                kgv::PronunciationAdmission::test_fixture,
+                loaded.lexicon.resource_sha256(), {}, true);
+            const kgv::ResolvedFrontendResources ambiguous_resources =
+                loaded.chain(kgv::PronunciationAdmission::test_fixture,
+                             nullptr, kFrontendAbi, nullptr, nullptr,
+                             &ambiguous_rules);
+            kgv::ResolvedFrontendResult ambiguous;
+            require(kgv::run_resolved_frontend(
+                        "the hour.", KGV_PROFILE_PROSE,
+                        ambiguous_resources, {}, &ambiguous,
+                        &failure) == KGV_OK &&
+                        ambiguous.words[0U].role == "default" &&
+                        !ambiguous.words[0U].has_weak_form &&
+                        ambiguous.words[0U]
+                                .syllables[0U].segment_ids ==
+                            std::vector<std::uint16_t>({8U, 2U}) &&
+                        ambiguous.diagnostics.size() == 1U &&
+                        ambiguous.diagnostics[0U].code ==
+                            "WEAK_FORM_RULE_AMBIGUOUS",
+                    "overlapping weak-form rules did not fail closed");
+            kgv::ResolvedFrontendResult ordered_diagnostics;
+            require(kgv::run_resolved_frontend(
+                        "the hour the hour.", KGV_PROFILE_PROSE,
+                        ambiguous_resources, {}, &ordered_diagnostics,
+                        &failure) == KGV_OK &&
+                        ordered_diagnostics.diagnostics.size() == 2U &&
+                        ordered_diagnostics.diagnostics[0U].span.byte_start ==
+                            0U &&
+                        ordered_diagnostics.diagnostics[1U].span.byte_start ==
+                            9U,
+                    "right-to-left weak-form selection reordered diagnostics");
+
+            kgv::ResolvedFrontendResult repeated_weak_forms;
+            require(kgv::run_resolved_frontend(
+                        weak_form_text, KGV_PROFILE_PROSE,
+                        weak_form_resources, {}, &repeated_weak_forms,
+                        &failure) == KGV_OK,
+                    "repeated weak-form request failed");
+            require_same(selected, repeated_weak_forms);
+        }
+
+        {
             kgv::RequestPronunciationOverride replacement;
             replacement.span = kgv::SourceSpan{0U, 3U};
             replacement.kind = kgv::RequestOverrideKind::replacement_text;
@@ -1405,6 +1726,82 @@ int main() {
                             "FRONTEND_MORPHOLOGY_INVENTORY_MISMATCH");
         }
         {
+            kgv::WeakFormRules unloaded_rules;
+            kgv::ResolvedFrontendResources invalid = resources;
+            invalid.weak_form_rules = &unloaded_rules;
+            require_failure("cat.", invalid, {}, KGV_INVALID_STATE,
+                            "FRONTEND_WEAK_FORM_RULES_NOT_LOADED");
+        }
+        {
+            const kgv::WeakFormRules product_rules = load_weak_forms(
+                kgv::PronunciationAdmission::product_admitted,
+                loaded.lexicon.resource_sha256(), std::string(64U, 'c'));
+            kgv::ResolvedFrontendResources invalid = resources;
+            invalid.weak_form_rules = &product_rules;
+            require_failure("cat.", invalid, {}, KGV_ABI_MISMATCH,
+                            "FRONTEND_WEAK_FORM_ADMISSION_MISMATCH");
+        }
+        {
+            const kgv::WeakFormRules wrong_lexicon = load_weak_forms(
+                kgv::PronunciationAdmission::test_fixture,
+                std::string(64U, 'b'));
+            kgv::ResolvedFrontendResources invalid = resources;
+            invalid.weak_form_rules = &wrong_lexicon;
+            require_failure("cat.", invalid, {}, KGV_ABI_MISMATCH,
+                            "FRONTEND_WEAK_FORM_LEXICON_MISMATCH");
+        }
+        {
+            std::vector<kgv::SegmentDefinition> alternate_segments = segments();
+            alternate_segments.push_back({"X", 11U});
+            const std::string alternate_inventory_sha =
+                kgv::pronunciation_segment_inventory_sha256(
+                    alternate_segments);
+            const std::string rule_resource = weak_form_fixture(
+                kgv::PronunciationAdmission::test_fixture,
+                loaded.lexicon.resource_sha256(), alternate_inventory_sha,
+                {});
+            kgv::WeakFormRules wrong_inventory;
+            kgv::WeakFormResourceFailure rule_failure;
+            require(kgv::load_weak_form_rules(
+                        rule_resource, kgv::sha256_hex(rule_resource),
+                        loaded.lexicon.resource_sha256(),
+                        alternate_inventory_sha,
+                        kgv::PronunciationAdmission::test_fixture,
+                        alternate_segments, &wrong_inventory,
+                        &rule_failure) == KGV_OK,
+                    "alternate weak-form inventory fixture did not load");
+            kgv::ResolvedFrontendResources invalid = resources;
+            invalid.weak_form_rules = &wrong_inventory;
+            require_failure("cat.", invalid, {}, KGV_ABI_MISMATCH,
+                            "FRONTEND_WEAK_FORM_INVENTORY_MISMATCH");
+        }
+        {
+            const std::string inventory_sha =
+                kgv::pronunciation_segment_inventory_sha256(segments());
+            std::string incompatible_resource = weak_form_fixture(
+                kgv::PronunciationAdmission::test_fixture,
+                loaded.lexicon.resource_sha256(), inventory_sha, {});
+            const std::string needle = "\"role\":\"weak\"";
+            const std::size_t offset = incompatible_resource.find(needle);
+            require(offset != std::string::npos,
+                    "weak-form role mismatch fixture drifted");
+            incompatible_resource.replace(
+                offset, needle.size(), "\"role\":\"unreviewed\"");
+            kgv::WeakFormRules incompatible;
+            kgv::WeakFormResourceFailure rule_failure;
+            require(kgv::load_weak_form_rules(
+                        incompatible_resource,
+                        kgv::sha256_hex(incompatible_resource),
+                        loaded.lexicon.resource_sha256(), inventory_sha,
+                        kgv::PronunciationAdmission::test_fixture,
+                        segments(), &incompatible, &rule_failure) == KGV_OK,
+                    "weak-form role mismatch fixture did not load");
+            kgv::ResolvedFrontendResources invalid = resources;
+            invalid.weak_form_rules = &incompatible;
+            require_failure("cat.", invalid, {}, KGV_ABI_MISMATCH,
+                            "FRONTEND_WEAK_FORM_ROLE_MISMATCH");
+        }
+        {
             const std::string review_a(64U, 'a');
             const std::string review_b(64U, 'b');
             const LoadedResources product = load_resources(
@@ -1450,6 +1847,23 @@ int main() {
                 "FRONTEND_MORPHOLOGY_REVIEW_MISMATCH");
         }
         {
+            const std::string review_a(64U, 'a');
+            const std::string review_b(64U, 'b');
+            const LoadedResources product = load_resources(
+                kgv::PronunciationAdmission::product_admitted, review_a,
+                review_a);
+            const kgv::WeakFormRules mismatched_rules = load_weak_forms(
+                kgv::PronunciationAdmission::product_admitted,
+                product.lexicon.resource_sha256(), review_b);
+            require_failure(
+                "cat.",
+                product.chain(
+                    kgv::PronunciationAdmission::product_admitted, nullptr,
+                    kFrontendAbi, nullptr, nullptr, &mismatched_rules),
+                {}, KGV_ABI_MISMATCH,
+                "FRONTEND_WEAK_FORM_REVIEW_MISMATCH");
+        }
+        {
             const std::string review(64U, 'a');
             const LoadedResources product = load_resources(
                 kgv::PronunciationAdmission::product_admitted, review,
@@ -1486,6 +1900,24 @@ int main() {
                         product_inflected.words[0U].morphology_stem_source ==
                             kgv::ResolvedPronunciationSource::product_lexicon,
                     "review-bound product morphology was not admitted");
+
+            const kgv::WeakFormRules product_weak_forms = load_weak_forms(
+                kgv::PronunciationAdmission::product_admitted,
+                product.lexicon.resource_sha256(), review);
+            kgv::ResolvedFrontendResult product_weak;
+            require(kgv::run_resolved_frontend(
+                        "the hour.", KGV_PROFILE_PROSE,
+                        product.chain(
+                            kgv::PronunciationAdmission::product_admitted,
+                            nullptr, kFrontendAbi, nullptr, nullptr,
+                            &product_weak_forms),
+                        {}, &product_weak, &failure) == KGV_OK &&
+                        product_weak.words.size() == 2U &&
+                        product_weak.words[0U].pronunciation_source ==
+                            kgv::ResolvedPronunciationSource::product_lexicon &&
+                        product_weak.words[0U].has_weak_form &&
+                        product_weak.words[0U].role == "weak-vowel",
+                    "review-bound product weak forms were not admitted");
         }
 
         std::mt19937_64 generator(0x4b47562d5245534fULL);

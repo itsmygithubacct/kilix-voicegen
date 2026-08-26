@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:kilix:voicegen:schema:weak-form-rules-header:v1",
+  "title": "Kilix Voicegen weak-form rules JSONL header",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "admission", "dialect", "resource_id", "base_lexicon_sha256", "segment_inventory_sha256", "review_record_sha256", "entry_count", "vowel_segments"],
+  "properties": {
+    "schema": {"const": "kilix.voicegen.weak-form-rules/v1"},
+    "admission": {"enum": ["product-admitted", "test-fixture"]},
+    "dialect": {"const": "en-AU"},
+    "resource_id": {"type": "string", "pattern": "^[a-z][a-z0-9._:/-]{0,127}$"},
+    "base_lexicon_sha256": {"$ref": "#/$defs/sha256"},
+    "segment_inventory_sha256": {"$ref": "#/$defs/sha256"},
+    "review_record_sha256": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "#/$defs/sha256"}
+      ]
+    },
+    "entry_count": {"type": "integer", "minimum": 0, "maximum": 4096},
+    "vowel_segments": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,31}$"}
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"admission": {"const": "product-admitted"}}},
+      "then": {
+        "properties": {
+          "entry_count": {"minimum": 1},
+          "review_record_sha256": {"$ref": "#/$defs/sha256"}
+        }
+      },
+      "else": {"properties": {"review_record_sha256": {"type": "null"}}}
+    }
+  ],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}
