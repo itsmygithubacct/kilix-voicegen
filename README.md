@@ -12,26 +12,31 @@ repository provides the frozen C ABI draft, strict model-package verification,
 strict UTF-8/control validation, a typed lexical frontend trace, a native CLI,
 and a deterministic fixture engine. P1 implementation is active: the pinned
 utf8proc/Unicode 17 dependency now supplies NFC with original-byte spans, and the
-staged lexical/normalization vectors execute. Reviewed pronunciation data, a
-product model-token inventory, recording pilots, and neural inference remain
-open. A strict pronunciation-resource ABI and native loader now bind canonical
-`en-AU` JSONL
+staged lexical/normalization vectors execute. Reviewed product pronunciation
+data, a product model-token inventory, production recordings, and native neural
+inference remain open. A strict pronunciation-resource ABI and native loader now
+bind canonical `en-AU` JSONL
 to caller-pinned file and segment-inventory hashes, enforce bounded NFC entries
 and role-qualified syllables, and require a separate review-record hash before a
 resource can be admitted as product data. No product lexicon has yet passed that
 human review gate. A compact deterministic LTS decision-forest trainer and
 native inference loader now provide the corresponding offline fallback
 mechanism, but only first-party in-memory/test data have exercised it; no
-product LTS artifact exists. The fixture emits a quiet triangle-wave test signal
-so streaming, backpressure, cancellation, corruption handling, and language
-bindings can be tested without a model.
+product LTS artifact exists. Model packages now carry the segment inventory,
+lexicon, LTS forest, and model-token inventory as distinct hashed roles. Engine
+open loads those exact verified bytes and validates the complete admission/hash
+chain; every public job resolves and stores bounded model-token chunks before it
+can run. The fixture emits a quiet triangle-wave test signal so streaming,
+backpressure, cancellation, corruption handling, and language bindings can be
+tested before the neural backend is installed.
 
 The v1 frontend and model contract is fixed to `en-AU`; it has no automatic
 dialect chooser. British English, then General American English, are
 whole-release recruitment/licensing fallbacks that require a new contract.
 
-**This snapshot does not yet produce speech.** It contains no trained model,
-recorded voice, downloaded checkpoint, or generated audio.
+**This source snapshot does not yet produce speech.** It contains no trained
+model, recorded voice, downloaded checkpoint, or generated audio. A research-only
+Australian-female technical pilot exists outside this clean source tree.
 
 ## Build and test
 
@@ -92,7 +97,8 @@ speech. Generated audio and model packages must stay outside this repository.
   request ceiling;
 - one implicit General Australian English (`en-AU`) frontend shared by both
   voices;
-- exactly `kilix-female-01` and `kilix-male-01` in the v1 model contract;
+- only the fixed IDs `kilix-female-01` and `kilix-male-01`; a package may carry
+  one during a bounded pilot or both for the product release;
 - synchronous 20 ms PCM callbacks at 24 kHz, with consumer backpressure and
   thread-safe cancellation;
 - caller-pinned `RELEASE.json` hash followed by a verified manifest and payload
@@ -131,9 +137,9 @@ paragraph/sentence/clause/comma boundaries in that order when a chunk is
 required, and marks both sides of a forced word-boundary continuation. No
 product inventory or final token IDs have yet been frozen.
 
-An internal resolved-frontend operation now joins the core resources and
-optional reviewed overlays. It requires one admission class and segment
-inventory, binds the LTS model to the exact loaded lexicon and the token
+The synthesis job path now invokes the resolved-frontend operation that joins
+the core resources and optional reviewed overlays. It requires one admission
+class and segment inventory, binds the LTS model to the exact loaded lexicon and the token
 inventory to a caller-pinned frontend ABI, and requires product lexicon/LTS
 review hashes to agree. It resolves
 role-qualified lexicon entries before LTS, retains per-word provenance, and
@@ -148,8 +154,8 @@ re-enters lexical scanning once. Replacement words, phrases, diagnostics, and
 failures are mapped back to the original request byte span, and override
 boundaries may not split a Unicode grapheme. Overlap, malformed replacement
 text, an unknown segment, or an ambiguous phone target fails with the indexed
-override and no partial output. This seam uses synthetic fixtures only and is
-not yet called by the public synthesis engine.
+override and no partial output. The installed fixture resources are synthetic;
+no fixture resource can claim product admission.
 
 An optional strict contextual-heteronym JSONL resource can now assign a role
 when the caller did not provide one and no exact phone override owns the word.

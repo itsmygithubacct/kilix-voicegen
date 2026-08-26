@@ -108,6 +108,7 @@ target_link_libraries(kilix_voicegen_frontend PUBLIC
 
 add_library(kilix_voicegen SHARED
   src/runtime/engine.cpp
+  src/runtime/frontend_package.cpp
   src/runtime/model_package.cpp)
 add_library(Kilix::Voicegen ALIAS kilix_voicegen)
 

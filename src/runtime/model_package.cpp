@@ -26,6 +26,9 @@ namespace {
 constexpr std::uint64_t kMaximumReleaseBytes = 65536U;
 constexpr std::uint64_t kMaximumManifestBytes = 1048576U;
 constexpr std::size_t kMaximumPayloadFiles = 256U;
+constexpr std::uint64_t kMaximumPayloadBytes = 2ULL * 1024ULL * 1024ULL * 1024ULL;
+constexpr std::uint64_t kMaximumTotalPayloadBytes =
+    4ULL * 1024ULL * 1024ULL * 1024ULL;
 
 class ValidationError final : public std::runtime_error {
 public:
@@ -203,6 +206,38 @@ std::string read_bounded(const std::filesystem::path &path,
     return result;
 }
 
+std::string read_payload_exact(const std::filesystem::path &path,
+                               std::uint64_t declared_bytes) {
+    if (declared_bytes > kMaximumPayloadBytes ||
+        declared_bytes > std::numeric_limits<std::size_t>::max()) {
+        invalid("model payload exceeds the per-file size limit");
+    }
+    std::error_code code;
+    const std::uintmax_t file_size = std::filesystem::file_size(path, code);
+    if (code) {
+        io_error("could not determine a required model payload size");
+    }
+    if (file_size != declared_bytes) {
+        mismatch("model payload byte count does not match manifest");
+    }
+    std::ifstream stream(path, std::ios::binary);
+    if (!stream) {
+        io_error("could not open a required model payload");
+    }
+    std::string result(static_cast<std::size_t>(declared_bytes), '\0');
+    if (!result.empty()) {
+        stream.read(result.data(), static_cast<std::streamsize>(result.size()));
+        if (stream.gcount() != static_cast<std::streamsize>(result.size())) {
+            io_error("could not read a complete model payload");
+        }
+    }
+    char extra = '\0';
+    if (stream.get(extra)) {
+        mismatch("model payload changed while it was being read");
+    }
+    return result;
+}
+
 json::Value parse_metadata(std::string_view bytes) {
     try {
         return json::parse(bytes);
@@ -278,7 +313,8 @@ void verify_audio(const json::Value &value, VerifiedModel *model) {
 void verify_frontend(const json::Value &value, VerifiedModel *model) {
     const auto &object = object_value(value);
     if (!exact_keys(object, {"schema", "dialect", "unicode_version", "token_schema",
-                             "inventory_sha256", "segment_ids"})) {
+                             "inventory_sha256", "segment_ids", "admission",
+                             "abi_sha256"})) {
         invalid("frontend metadata fields do not match schema v1");
     }
     if (string_value(required(object, "schema")) != "kilix.voicegen.frontend/v1" ||
@@ -291,7 +327,16 @@ void verify_frontend(const json::Value &value, VerifiedModel *model) {
     if (string_value(required(object, "unicode_version")) != "17.0.0") {
         unsupported_schema("model Unicode version is not supported");
     }
-    require_sha(string_value(required(object, "inventory_sha256")));
+    model->segment_inventory_sha256 =
+        string_value(required(object, "inventory_sha256"));
+    require_sha(model->segment_inventory_sha256);
+    model->frontend_abi_sha256 = string_value(required(object, "abi_sha256"));
+    require_sha(model->frontend_abi_sha256);
+    model->frontend_admission = string_value(required(object, "admission"), 32U);
+    if (model->frontend_admission != "product-admitted" &&
+        model->frontend_admission != "test-fixture") {
+        invalid("model frontend admission is unsupported");
+    }
     const auto &segments = array_value(required(object, "segment_ids"));
     if (segments.empty() || segments.size() > 65535U) {
         invalid("frontend segment inventory size is invalid");
@@ -309,8 +354,8 @@ void verify_frontend(const json::Value &value, VerifiedModel *model) {
 
 void verify_voices(const json::Value &value, VerifiedModel *model) {
     const auto &voices = array_value(value);
-    if (voices.size() != 2U) {
-        invalid("model manifest must declare exactly two voices");
+    if (voices.empty() || voices.size() > 2U) {
+        invalid("model manifest must declare one or two v1 voices");
     }
     std::set<std::string> found;
     for (std::size_t i = 0U; i < voices.size(); ++i) {
@@ -326,10 +371,7 @@ void verify_voices(const json::Value &value, VerifiedModel *model) {
             invalid("model contains a duplicate voice ID");
         }
         (void)string_value(required(voice, "label"), 80U);
-        model->voice_ids[i] = id;
-    }
-    if (found.size() != 2U) {
-        invalid("model does not contain both required v1 voices");
+        model->voice_ids.push_back(id);
     }
 }
 
@@ -369,14 +411,18 @@ void verify_cpu_features(const json::Value &value) {
 void verify_files(const json::Value &value,
                   const std::filesystem::path &root,
                   std::uint64_t expected_model_bytes,
+                  std::string_view engine_kind,
+                  VerifiedModel *model,
                   std::set<std::string> *verified_paths) {
     const auto &files = array_value(value);
     if (files.empty() || files.size() > kMaximumPayloadFiles) {
         invalid("model payload file count is invalid");
     }
     std::set<std::string> paths;
-    bool fixture_graph = false;
+    std::set<std::string> roles;
     std::uint64_t total_bytes = 0U;
+    std::vector<VerifiedPayload> payloads;
+    payloads.reserve(files.size());
     for (const auto &entry : files) {
         const auto &file = object_value(entry);
         if (!exact_keys(file, {"path", "role", "bytes", "sha256"})) {
@@ -394,30 +440,53 @@ void verify_files(const json::Value &value,
         if (!paths.insert(path).second) {
             invalid("model manifest contains a duplicate payload path");
         }
-        require_regular_without_symlinks(root, path);
-        Sha256Digest actual_digest{};
-        std::uint64_t actual_bytes = 0U;
-        std::string hash_error;
-        if (!sha256_file(root / path, &actual_digest, &actual_bytes, &hash_error)) {
-            io_error(hash_error);
+        if (!roles.insert(role).second) {
+            invalid("model manifest contains a duplicate payload role");
         }
-        if (actual_bytes != declared_bytes || sha256_hex(actual_digest) != declared_sha) {
+        require_regular_without_symlinks(root, path);
+        std::string payload = read_payload_exact(root / path, declared_bytes);
+        if (sha256_hex(payload) != declared_sha) {
             mismatch("model payload byte count or SHA-256 does not match manifest");
         }
-        if (total_bytes > std::numeric_limits<std::uint64_t>::max() - actual_bytes) {
+        if (total_bytes > kMaximumTotalPayloadBytes - declared_bytes) {
             invalid("model payload size total overflowed");
         }
-        total_bytes += actual_bytes;
-        if (role == "fixture_graph" && path == "fixture.graph") {
-            fixture_graph = true;
-        }
+        total_bytes += declared_bytes;
+        payloads.push_back(VerifiedPayload{path, role, declared_sha,
+                                           std::move(payload)});
     }
-    if (!fixture_graph) {
-        invalid("fixture model is missing its deterministic fixture graph");
+    if (engine_kind == "fixture-tone/v1") {
+        const std::set<std::string> required_roles = {
+            "fixture_graph", "segment_inventory", "pronunciation_lexicon",
+            "lts_model", "model_token_inventory",
+        };
+        const std::set<std::string> optional_roles = {
+            "heteronym_rules", "morphology_rules", "weak_form_rules",
+        };
+        for (const std::string &role : required_roles) {
+            if (roles.find(role) == roles.end()) {
+                invalid("fixture model is missing a required payload role");
+            }
+        }
+        for (const std::string &role : roles) {
+            if (required_roles.find(role) == required_roles.end() &&
+                optional_roles.find(role) == optional_roles.end()) {
+                invalid("fixture model declares an unsupported payload role");
+            }
+        }
+        const auto graph = std::find_if(
+            payloads.begin(), payloads.end(), [](const VerifiedPayload &payload) {
+                return payload.role == "fixture_graph";
+            });
+        if (graph == payloads.end() || graph->path != "fixture.graph" ||
+            graph->bytes.empty()) {
+            invalid("fixture model is missing its deterministic fixture graph");
+        }
     }
     if (total_bytes != expected_model_bytes) {
         invalid("declared model byte total does not match payload files");
     }
+    model->payloads = std::move(payloads);
     *verified_paths = std::move(paths);
 }
 
@@ -573,7 +642,8 @@ void verify_manifest(const json::Value &manifest,
     verify_cpu_features(required(object, "required_cpu_features"));
     const std::uint64_t model_bytes = verify_resources(required(object, "resources"));
     std::set<std::string> verified_paths;
-    verify_files(required(object, "files"), root, model_bytes, &verified_paths);
+    verify_files(required(object, "files"), root, model_bytes,
+                 model->engine_kind, model, &verified_paths);
     verify_tensors(required(object, "tensors"), model->engine_kind);
     verify_licenses(required(object, "licenses"), verified_paths);
     verify_determinism(required(object, "determinism"), model);
@@ -581,6 +651,15 @@ void verify_manifest(const json::Value &manifest,
 }
 
 }  // namespace
+
+const VerifiedPayload *VerifiedModel::payload_for_role(
+    std::string_view role) const noexcept {
+    const auto found = std::find_if(
+        payloads.begin(), payloads.end(), [role](const VerifiedPayload &payload) {
+            return payload.role == role;
+        });
+    return found == payloads.end() ? nullptr : &*found;
+}
 
 int verify_model_package(const std::filesystem::path &directory,
                          std::string_view expected_release_sha256,

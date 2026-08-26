@@ -13,6 +13,8 @@ from typing import Any
 
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 SAFE_PATH = re.compile(r"[A-Za-z0-9._/-]{1,255}\Z")
+ROLE = re.compile(r"[a-z][a-z0-9_]{0,63}\Z")
+SEGMENT_NAME = re.compile(r"[A-Z][A-Z0-9_]{0,31}\Z")
 ROOT_KEYS = {
     "schema", "model_id", "version", "engine", "revisions", "runtime_abi", "audio",
     "frontend", "voices", "quantization", "required_cpu_features", "files", "tensors",
@@ -86,6 +88,43 @@ def _check_no_symlink(root: pathlib.Path, relative: str) -> pathlib.Path:
     return current
 
 
+def _parse_segments(payload: bytes) -> list[int]:
+    if not payload or len(payload) > 4 * 1024 * 1024 or not payload.endswith(b"\n"):
+        raise VerificationError("segment inventory is empty, oversized, or unterminated")
+    if b"\r" in payload or b"\0" in payload:
+        raise VerificationError("segment inventory is not canonical LF text")
+    ids: list[int] = []
+    names: set[str] = set()
+    previous = 0
+    for line in payload[:-1].split(b"\n"):
+        if not line or line.count(b"\t") != 1:
+            raise VerificationError("segment inventory line is malformed")
+        raw_id, raw_name = line.split(b"\t")
+        try:
+            encoded_id = raw_id.decode("ascii")
+            name = raw_name.decode("ascii")
+        except UnicodeDecodeError as error:
+            raise VerificationError("segment inventory is not ASCII") from error
+        if (not encoded_id.isdigit() or encoded_id.startswith("0")
+                or SEGMENT_NAME.fullmatch(name) is None):
+            raise VerificationError("segment inventory ID or name is non-canonical")
+        segment_id = int(encoded_id)
+        if not 1 <= segment_id <= 65535 or segment_id <= previous or name in names:
+            raise VerificationError("segment inventory IDs and names are not unique ascending")
+        ids.append(segment_id)
+        names.add(name)
+        previous = segment_id
+    ordered_names = [line.split(b"\t", 1)[1].decode("ascii")
+                     for line in payload[:-1].split(b"\n")]
+    canonical = b"".join(
+        f"{segment_id}\t{name}\n".encode("ascii")
+        for segment_id, name in zip(ids, ordered_names, strict=True)
+    )
+    if canonical != payload:
+        raise VerificationError("segment inventory bytes are not canonical")
+    return ids
+
+
 def verify_model(directory: pathlib.Path, expected_release_sha256: str) -> dict[str, Any]:
     _require_sha(expected_release_sha256)
     if directory.is_symlink() or not directory.is_dir():
@@ -121,20 +160,31 @@ def verify_model(directory: pathlib.Path, expected_release_sha256: str) -> dict[
     frontend = manifest["frontend"]
     if (not isinstance(frontend, dict)
             or set(frontend) != {"schema", "dialect", "unicode_version", "token_schema",
-                                "inventory_sha256", "segment_ids"}
+                                "inventory_sha256", "segment_ids", "admission",
+                                "abi_sha256"}
             or frontend.get("schema") != "kilix.voicegen.frontend/v1"
             or frontend.get("dialect") != "en-AU"
             or frontend.get("token_schema") != "kilix.voicegen.tokens/v1"
             or frontend.get("unicode_version") != "17.0.0"
-            or frontend.get("segment_ids") != [1, 2, 3, 4]):
+            or frontend.get("admission") not in {"product-admitted", "test-fixture"}
+            or not isinstance(frontend.get("segment_ids"), list)
+            or not frontend.get("segment_ids")):
         raise VerificationError("frontend contract is unsupported")
     _require_sha(frontend.get("inventory_sha256"))
+    _require_sha(frontend.get("abi_sha256"))
 
     voices = manifest["voices"]
-    if (not isinstance(voices, list) or len(voices) != 2
-            or {voice.get("id") for voice in voices if isinstance(voice, dict)}
-            != {"kilix-female-01", "kilix-male-01"}):
-        raise VerificationError("model must contain exactly the two v1 voice IDs")
+    if not isinstance(voices, list) or not 1 <= len(voices) <= 2:
+        raise VerificationError("model must contain one or two v1 voice IDs")
+    voice_ids: set[str] = set()
+    for voice in voices:
+        if (not isinstance(voice, dict) or set(voice) != {"id", "label"}
+                or voice.get("id") not in {"kilix-female-01", "kilix-male-01"}
+                or not isinstance(voice.get("label"), str)
+                or not 1 <= len(voice["label"]) <= 80
+                or voice["id"] in voice_ids):
+            raise VerificationError("voice metadata is invalid")
+        voice_ids.add(voice["id"])
 
     features = manifest["required_cpu_features"]
     if not isinstance(features, list) or any(not isinstance(item, str) for item in features):
@@ -159,12 +209,15 @@ def verify_model(directory: pathlib.Path, expected_release_sha256: str) -> dict[
     if not isinstance(files, list) or not 1 <= len(files) <= 256:
         raise VerificationError("payload file list is invalid")
     paths: set[str] = set()
+    roles: dict[str, tuple[str, bytes]] = {}
     total_bytes = 0
-    fixture_graph = False
     for item in files:
         if not isinstance(item, dict) or set(item) != {"path", "role", "bytes", "sha256"}:
             raise VerificationError("payload metadata fields are invalid")
         relative = _safe_path(item["path"])
+        role = item["role"]
+        if not isinstance(role, str) or ROLE.fullmatch(role) is None or role in roles:
+            raise VerificationError("payload role is invalid or duplicated")
         if relative in paths:
             raise VerificationError("payload path is duplicated")
         paths.add(relative)
@@ -174,9 +227,22 @@ def verify_model(directory: pathlib.Path, expected_release_sha256: str) -> dict[
                 or _hash(payload) != _require_sha(item["sha256"])):
             raise VerificationError("payload does not match its byte count or SHA-256")
         total_bytes += len(payload)
-        fixture_graph |= relative == "fixture.graph" and item["role"] == "fixture_graph"
-    if not fixture_graph:
+        roles[role] = (relative, payload)
+    required_roles = {
+        "fixture_graph", "segment_inventory", "pronunciation_lexicon",
+        "lts_model", "model_token_inventory",
+    }
+    optional_roles = {"heteronym_rules", "morphology_rules", "weak_form_rules"}
+    if not required_roles <= roles.keys() or roles.keys() - required_roles - optional_roles:
+        raise VerificationError("fixture payload roles are absent or unsupported")
+    graph_path, graph = roles["fixture_graph"]
+    if graph_path != "fixture.graph" or not graph:
         raise VerificationError("deterministic fixture graph is absent")
+    _segment_path, segment_payload = roles["segment_inventory"]
+    segment_ids = _parse_segments(segment_payload)
+    if (segment_ids != frontend["segment_ids"]
+            or _hash(segment_payload) != frontend["inventory_sha256"]):
+        raise VerificationError("segment inventory does not match frontend metadata")
     resources = manifest["resources"]
     if not isinstance(resources, dict) or resources.get("model_bytes") != total_bytes:
         raise VerificationError("model resource byte total is invalid")

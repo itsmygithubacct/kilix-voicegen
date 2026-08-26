@@ -18,6 +18,14 @@ DEFAULT_SEED = 0x4B696C6978564731
 CANONICAL_SPOKEN_SCALARS = 12
 CALLBACK_FRAMES = 480
 
+CONTROLS = (
+    "PAD", "BOS", "EOS", "WB", "SYL", "STRESS_0", "STRESS_1",
+    "STRESS_2", "END_NONE", "END_COMMA", "END_COLON", "END_SEMICOLON",
+    "END_PERIOD", "END_QUESTION", "END_EXCLAMATION", "END_PARAGRAPH",
+    "END_CONTINUATION",
+)
+SEGMENTS = ((1, "AA"), (2, "AE"), (3, "B"), (4, "K"))
+
 JsonObject = dict[str, Any]
 ManifestMutation = Callable[[JsonObject], None]
 
@@ -57,8 +65,148 @@ def fixture_smoke_sha256() -> str:
     return digest.hexdigest()
 
 
-def build_manifest(graph_bytes: bytes) -> JsonObject:
-    inventory = b"1\tAA\n2\tAE\n3\tB\n4\tK\n"
+def _jsonl(*documents: JsonObject) -> bytes:
+    return b"".join(_canonical(document) for document in documents)
+
+
+def build_payloads(graph_bytes: bytes) -> tuple[dict[str, bytes], str]:
+    inventory = b"".join(
+        f"{segment_id}\t{name}\n".encode("ascii")
+        for segment_id, name in SEGMENTS
+    )
+    inventory_sha = _sha256(inventory)
+
+    fixture_words = sorted({
+        "hello", *[chr(symbol) for symbol in range(ord("a"), ord("z") + 1)],
+        "zero", "one", "two", "three", "four", "five", "six", "seven",
+        "eight", "nine", "dash", "slash", "dot", "colon", "at",
+        "underscore", "question", "equals", "and", "dollar", "greater",
+        "than", "less", "tilde", "backslash", "hash", "percent", "plus",
+        "star", "pipe", "exclamation", "left", "right", "bracket", "brace",
+        "parenthesis", "comma", "semicolon", "caret", "backtick", "double",
+        "single", "quote",
+    })
+    lexicon_entries: list[JsonObject] = [{
+        "case": "ascii-fold",
+        "grapheme": word,
+        "roles": ["default"],
+        "schema": "kilix.voicegen.pronunciation-entry/v1",
+        "source": "first-party-test-fixture",
+        "syllables": [{"segments": ["K"], "stress": "primary"}],
+    } for word in fixture_words]
+    lexicon = _jsonl({
+        "admission": "test-fixture",
+        "dialect": "en-AU",
+        "entry_count": len(lexicon_entries),
+        "resource_id": "kilix-en-au-runtime-lexicon-fixture-1",
+        "review_record_sha256": None,
+        "schema": "kilix.voicegen.pronunciation-lexicon/v1",
+        "segment_inventory_sha256": inventory_sha,
+    }, *lexicon_entries)
+    lexicon_sha = _sha256(lexicon)
+
+    roots = {chr(symbol): 0 for symbol in range(ord("a"), ord("z") + 1)}
+    lts = _jsonl(
+        {
+            "admission": "test-fixture",
+            "context_left": 0,
+            "context_right": 1,
+            "dialect": "en-AU",
+            "maximum_steps": 2,
+            "node_count": 3,
+            "resource_id": "kilix-en-au-runtime-lts-fixture-1",
+            "review_record_sha256": None,
+            "roots": roots,
+            "schema": "kilix.voicegen.lts-model/v1",
+            "segment_inventory_sha256": inventory_sha,
+            "source_lexicon_sha256": lexicon_sha,
+            "training_record_sha256": _sha256(
+                b"kilix-voicegen first-party runtime LTS fixture v1\n"
+            ),
+        },
+        {
+            "feature_offset": 1,
+            "feature_value": "$",
+            "id": 0,
+            "kind": "decision",
+            "no": 2,
+            "schema": "kilix.voicegen.lts-node/v1",
+            "yes": 1,
+        },
+        {
+            "emissions": [{"segment_ids": [4], "syllable_end": "primary"}],
+            "id": 1,
+            "kind": "leaf",
+            "schema": "kilix.voicegen.lts-node/v1",
+        },
+        {
+            "emissions": [{"segment_ids": [4], "syllable_end": None}],
+            "id": 2,
+            "kind": "leaf",
+            "schema": "kilix.voicegen.lts-node/v1",
+        },
+    )
+    lts_sha = _sha256(lts)
+
+    frontend_abi = _sha256(_canonical({
+        "dialect": "en-AU",
+        "lts_sha256": lts_sha,
+        "pronunciation_lexicon_sha256": lexicon_sha,
+        "schema": "kilix.voicegen.frontend-abi/v1",
+        "segment_inventory_sha256": inventory_sha,
+        "token_schema": "kilix.voicegen.tokens/v1",
+        "unicode_version": "17.0.0",
+    }))
+    token_documents: list[JsonObject] = [{
+        "admission": "test-fixture",
+        "dialect": "en-AU",
+        "entry_count": len(CONTROLS) + len(SEGMENTS),
+        "frontend_abi_sha256": frontend_abi,
+        "maximum_input_tokens": 512,
+        "resource_id": "kilix-en-au-runtime-tokens-fixture-1",
+        "schema": "kilix.voicegen.model-token-inventory/v1",
+        "segment_inventory_sha256": inventory_sha,
+    }]
+    token_documents.extend({
+        "id": token_id,
+        "kind": "control",
+        "name": name,
+        "schema": "kilix.voicegen.model-token-entry/v1",
+        "segment_id": None,
+    } for token_id, name in enumerate(CONTROLS))
+    token_documents.extend({
+        "id": len(CONTROLS) + index,
+        "kind": "segment",
+        "name": name,
+        "schema": "kilix.voicegen.model-token-entry/v1",
+        "segment_id": segment_id,
+    } for index, (segment_id, name) in enumerate(SEGMENTS))
+    tokens = _jsonl(*token_documents)
+
+    return ({
+        "fixture.graph": graph_bytes,
+        "frontend/segments.tsv": inventory,
+        "frontend/pronunciation.jsonl": lexicon,
+        "frontend/lts.jsonl": lts,
+        "frontend/tokens.jsonl": tokens,
+    }, frontend_abi)
+
+
+def build_manifest(payloads: dict[str, bytes], frontend_abi: str) -> JsonObject:
+    inventory = payloads["frontend/segments.tsv"]
+    roles = {
+        "fixture.graph": "fixture_graph",
+        "frontend/segments.tsv": "segment_inventory",
+        "frontend/pronunciation.jsonl": "pronunciation_lexicon",
+        "frontend/lts.jsonl": "lts_model",
+        "frontend/tokens.jsonl": "model_token_inventory",
+    }
+    files = [{
+        "bytes": len(payloads[path]),
+        "path": path,
+        "role": roles[path],
+        "sha256": _sha256(payloads[path]),
+    } for path in sorted(payloads)]
     return {
         "audio": {"channels": 1, "sample_format": "s16", "sample_rate": SAMPLE_RATE},
         "determinism": {
@@ -67,13 +215,10 @@ def build_manifest(graph_bytes: bytes) -> JsonObject:
             "test_vector_sha256": fixture_smoke_sha256(),
         },
         "engine": {"kind": "fixture-tone/v1"},
-        "files": [{
-            "bytes": len(graph_bytes),
-            "path": "fixture.graph",
-            "role": "fixture_graph",
-            "sha256": _sha256(graph_bytes),
-        }],
+        "files": files,
         "frontend": {
+            "abi_sha256": frontend_abi,
+            "admission": "test-fixture",
             "dialect": "en-AU",
             "inventory_sha256": _sha256(inventory),
             "schema": "kilix.voicegen.frontend/v1",
@@ -90,7 +235,10 @@ def build_manifest(graph_bytes: bytes) -> JsonObject:
         "quantization": {"policy": "Integer fixture oscillator; no neural tensors.",
                          "precision": "fixture"},
         "required_cpu_features": [],
-        "resources": {"minimum_memory_bytes": 1048576, "model_bytes": len(graph_bytes)},
+        "resources": {
+            "minimum_memory_bytes": 1048576,
+            "model_bytes": sum(len(payload) for payload in payloads.values()),
+        },
         "revisions": {
             "architecture": "fixture-tone/v1",
             "export": "first-party-generator/v1",
@@ -127,7 +275,8 @@ def create_fixture_model(output: pathlib.Path, graph_path: pathlib.Path,
         raise ValueError("fixture output directory must not be a symbolic link")
     output.mkdir(parents=True, exist_ok=True)
     graph_bytes = graph_path.read_bytes()
-    manifest = build_manifest(graph_bytes)
+    payloads, frontend_abi = build_payloads(graph_bytes)
+    manifest = build_manifest(payloads, frontend_abi)
     if mutation is not None:
         mutation(manifest)
     manifest_bytes = _canonical(manifest)
@@ -142,7 +291,10 @@ def create_fixture_model(output: pathlib.Path, graph_path: pathlib.Path,
     release_bytes = _canonical(release)
     release_sha = _sha256(release_bytes)
 
-    _atomic_write(output / "fixture.graph", graph_bytes)
+    for relative, payload in payloads.items():
+        destination = output / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        _atomic_write(destination, payload)
     _atomic_write(output / "MANIFEST.json", manifest_bytes)
     _atomic_write(output / "RELEASE.json", release_bytes)
     _atomic_write(output / "RELEASE.sha256", (release_sha + "\n").encode("ascii"))

@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "frontend/frontend.h"
+#include "runtime/frontend_package.h"
 #include "runtime/model_package.h"
 #include "runtime/sha256.h"
 
@@ -131,6 +132,7 @@ struct kgv_engine final {
     std::atomic<bool> claimed{false};
     std::uint32_t thread_count = 1U;
     kgv::VerifiedModel model;
+    kgv::VerifiedFrontendPackage frontend;
 };
 
 struct kgv_job final {
@@ -142,7 +144,7 @@ struct kgv_job final {
     std::uint32_t rate_milli = 1000U;
     std::uint64_t seed = KGV_DEFAULT_SEED;
     kgv::FrontendAnalysis analysis;
-    std::vector<CopiedOverride> overrides;
+    kgv::ResolvedFrontendResult resolved;
     std::atomic<bool> cancelled{false};
     std::atomic<int> state{0};  // 0 created, 1 running, 2 finished
     std::mutex state_mutex;
@@ -258,6 +260,36 @@ int copy_and_validate_overrides(const kgv_frontend_input &frontend,
     return KGV_OK;
 }
 
+std::vector<kgv::RequestPronunciationOverride> resolved_overrides(
+    const std::vector<CopiedOverride> &copied) {
+    std::vector<kgv::RequestPronunciationOverride> result;
+    result.reserve(copied.size());
+    for (const CopiedOverride &entry : copied) {
+        kgv::RequestPronunciationOverride converted;
+        converted.span = {entry.byte_start, entry.byte_end};
+        if (entry.kind == KGV_OVERRIDE_REPLACEMENT_TEXT) {
+            converted.kind = kgv::RequestOverrideKind::replacement_text;
+            converted.replacement_text = entry.replacement;
+        } else {
+            converted.kind = kgv::RequestOverrideKind::phone_syllables;
+            for (const kgv_phone_segment &segment : entry.segments) {
+                if (segment.syllable_start != 0U) {
+                    kgv::PronunciationSyllable syllable;
+                    if (segment.stress == 1U) {
+                        syllable.stress = kgv::SyllableStress::primary;
+                    } else if (segment.stress == 2U) {
+                        syllable.stress = kgv::SyllableStress::secondary;
+                    }
+                    converted.syllables.push_back(std::move(syllable));
+                }
+                converted.syllables.back().segment_ids.push_back(segment.segment_id);
+            }
+        }
+        result.push_back(std::move(converted));
+    }
+    return result;
+}
+
 }  // namespace
 
 extern "C" {
@@ -348,9 +380,19 @@ int kgv_engine_open(const char *model_directory,
             return KGV_INVALID_MODEL;
         }
 
+        kgv::VerifiedFrontendPackage frontend;
+        std::string frontend_error;
+        const int frontend_status = kgv::load_verified_frontend_package(
+            model, &frontend, &frontend_error);
+        if (frontend_status != KGV_OK) {
+            write_error(error, error_size, frontend_error);
+            return frontend_status;
+        }
+
         auto engine = std::make_unique<kgv_engine>();
         engine->thread_count = options->thread_count;
         engine->model = std::move(model);
+        engine->frontend = std::move(frontend);
         *out_engine = engine.release();
         return KGV_OK;
     } catch (const std::bad_alloc &) {
@@ -430,6 +472,19 @@ int kgv_job_create(kgv_engine *engine,
             return status;
         }
 
+        const std::vector<kgv::RequestPronunciationOverride> request_overrides =
+            resolved_overrides(overrides);
+        kgv::ResolvedFrontendResult resolved;
+        kgv::ResolvedFrontendFailure resolved_failure;
+        static const std::vector<std::string> no_word_roles;
+        status = kgv::run_resolved_frontend(
+            text, request->frontend.profile, engine->frontend.resources(),
+            no_word_roles, request_overrides, &resolved, &resolved_failure);
+        if (status != KGV_OK) {
+            write_error(error, error_size, resolved_failure.message);
+            return status;
+        }
+
         bool expected = false;
         if (!engine->claimed.compare_exchange_strong(expected, true,
                                                      std::memory_order_acq_rel)) {
@@ -449,7 +504,7 @@ int kgv_job_create(kgv_engine *engine,
             std::lround(static_cast<double>(request->rate) * 1000.0));
         job->seed = request->seed;
         job->analysis = analysis;
-        job->overrides = std::move(overrides);
+        job->resolved = std::move(resolved);
         *out_job = job.release();
         return KGV_OK;
     } catch (const std::bad_alloc &) {

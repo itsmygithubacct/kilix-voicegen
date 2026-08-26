@@ -156,6 +156,21 @@ class BindingTests(unittest.TestCase):
                     self.assertEqual(caught.exception.status, expected)
                     self.assertNotIn("a" * 32, caught.exception.detail)
 
+    def test_job_creation_runs_the_verified_resolved_frontend(self) -> None:
+        with self.engine() as engine:
+            with self.assertRaises(VoicegenError) as unknown:
+                engine.create_job(
+                    "caf\N{LATIN SMALL LETTER E WITH ACUTE}",
+                    voice_id="kilix-female-01", profile=Profile.PROSE)
+            self.assertEqual(unknown.exception.status, Status.INVALID_TEXT)
+
+            with self.assertRaises(VoicegenError) as oversized_surface:
+                engine.create_job(
+                    "a" * 4097, voice_id="kilix-female-01",
+                    profile=Profile.PROSE)
+            self.assertEqual(oversized_surface.exception.status,
+                             Status.INPUT_TOO_LARGE)
+
 
 if __name__ == "__main__":
     unittest.main()

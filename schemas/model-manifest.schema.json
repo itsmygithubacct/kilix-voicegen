@@ -51,12 +51,14 @@
     "frontend": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["schema", "dialect", "unicode_version", "token_schema", "inventory_sha256", "segment_ids"],
+      "required": ["schema", "dialect", "unicode_version", "token_schema", "inventory_sha256", "segment_ids", "admission", "abi_sha256"],
       "properties": {
         "schema": {"const": "kilix.voicegen.frontend/v1"},
         "dialect": {"const": "en-AU"},
         "unicode_version": {"const": "17.0.0"},
         "token_schema": {"const": "kilix.voicegen.tokens/v1"},
+        "admission": {"enum": ["product-admitted", "test-fixture"]},
+        "abi_sha256": {"$ref": "#/$defs/sha256"},
         "inventory_sha256": {"$ref": "#/$defs/sha256"},
         "segment_ids": {
           "type": "array",
@@ -69,7 +71,7 @@
     },
     "voices": {
       "type": "array",
-      "minItems": 2,
+      "minItems": 1,
       "maxItems": 2,
       "items": {
         "type": "object",
