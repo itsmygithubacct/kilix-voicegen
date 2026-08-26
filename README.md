@@ -13,8 +13,12 @@ strict UTF-8/control validation, a typed lexical frontend trace, a native CLI,
 and a deterministic fixture engine. P1 implementation is active: the pinned
 utf8proc/Unicode 17 dependency now supplies NFC with original-byte spans, and the
 staged lexical/normalization vectors execute. Pronunciation resources, final
-model tokens, recording pilots, and neural inference remain open. The fixture
-emits a quiet triangle-wave test signal so
+model tokens, recording pilots, and neural inference remain open. A strict
+pronunciation-resource ABI and native loader now bind canonical `en-AU` JSONL
+to caller-pinned file and segment-inventory hashes, enforce bounded NFC entries
+and role-qualified syllables, and require a separate review-record hash before a
+resource can be admitted as product data. No product lexicon has yet passed that
+human review gate. The fixture emits a quiet triangle-wave test signal so
 streaming, backpressure, cancellation, corruption handling, and language
 bindings can be tested without a model.
 
@@ -96,6 +100,12 @@ Machine-readable schemas live in `schemas/`; executable conformance vectors
 live in `tests/conformance/`. Research notes, source snapshots, recordings,
 models, experiments, benchmark output, and implementation planning remain
 outside this source repository.
+
+The pronunciation JSONL contract has separate strict header and entry schemas.
+Its loader accepts resource bytes rather than discovering files, verifies the
+whole-resource SHA-256 and canonical segment-ID inventory, keeps exact and
+ASCII-folded lookups separate, resolves role-qualified variants before defaults,
+and clears all loaded state on every validation failure.
 
 `tools/build_en_au_lexicon_candidate.py` converts an explicitly hashed CMUdict
 snapshot into a deterministic candidate and Australian-review queue outside the

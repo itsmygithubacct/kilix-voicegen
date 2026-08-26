@@ -72,9 +72,21 @@ function(kgv_sanitizers target)
   endif()
 endfunction()
 
+add_library(kilix_voicegen_support STATIC
+  src/runtime/json.cpp
+  src/runtime/sha256.cpp)
+target_include_directories(kilix_voicegen_support PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src)
+set_target_properties(kilix_voicegen_support PROPERTIES
+  CXX_VISIBILITY_PRESET hidden
+  VISIBILITY_INLINES_HIDDEN YES)
+kgv_project_warnings(kilix_voicegen_support)
+kgv_sanitizers(kilix_voicegen_support)
+
 add_library(kilix_voicegen_frontend STATIC
   src/frontend/frontend.cpp
-  src/frontend/pipeline.cpp)
+  src/frontend/pipeline.cpp
+  src/frontend/pronunciation.cpp)
 target_include_directories(kilix_voicegen_frontend PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/include
   ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -83,13 +95,13 @@ set_target_properties(kilix_voicegen_frontend PROPERTIES
   VISIBILITY_INLINES_HIDDEN YES)
 kgv_project_warnings(kilix_voicegen_frontend)
 kgv_sanitizers(kilix_voicegen_frontend)
-target_link_libraries(kilix_voicegen_frontend PUBLIC utf8proc::utf8proc)
+target_link_libraries(kilix_voicegen_frontend PUBLIC
+  utf8proc::utf8proc
+  kilix_voicegen_support)
 
 add_library(kilix_voicegen SHARED
   src/runtime/engine.cpp
-  src/runtime/json.cpp
-  src/runtime/model_package.cpp
-  src/runtime/sha256.cpp)
+  src/runtime/model_package.cpp)
 add_library(Kilix::Voicegen ALIAS kilix_voicegen)
 
 target_compile_definitions(kilix_voicegen PRIVATE KGV_BUILDING_LIBRARY=1)
@@ -182,13 +194,15 @@ if(BUILD_TESTING)
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_exports.cmake")
   endif()
 
-  add_executable(test_sha256 tests/test_sha256.cpp src/runtime/sha256.cpp)
+  add_executable(test_sha256 tests/test_sha256.cpp)
+  target_link_libraries(test_sha256 PRIVATE kilix_voicegen_support)
   target_include_directories(test_sha256 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
   kgv_project_warnings(test_sha256)
   kgv_sanitizers(test_sha256)
   add_test(NAME sha256 COMMAND test_sha256)
 
-  add_executable(test_json tests/test_json.cpp src/runtime/json.cpp)
+  add_executable(test_json tests/test_json.cpp)
+  target_link_libraries(test_json PRIVATE kilix_voicegen_support)
   target_include_directories(test_json PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
   kgv_project_warnings(test_json)
   kgv_sanitizers(test_json)
@@ -257,6 +271,15 @@ if(BUILD_TESTING)
   kgv_project_warnings(test_frontend)
   kgv_sanitizers(test_frontend)
   add_test(NAME frontend_native COMMAND test_frontend)
+
+  add_executable(test_pronunciation tests/test_pronunciation.cpp)
+  target_link_libraries(test_pronunciation PRIVATE kilix_voicegen_frontend)
+  target_include_directories(test_pronunciation PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  kgv_project_warnings(test_pronunciation)
+  kgv_sanitizers(test_pronunciation)
+  add_test(NAME pronunciation_resource COMMAND test_pronunciation)
 
   if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT KGV_ENABLE_SANITIZERS)
     find_package(Threads REQUIRED)
