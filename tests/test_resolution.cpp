@@ -1,5 +1,6 @@
 #include "frontend/resolution.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
@@ -81,6 +82,27 @@ std::string pronunciation_fixture(
         "cat", "[\"default\"]",
         "[{\"segments\":[\"K\",\"AE\",\"T\"],"
         "\"stress\":\"primary\"}]");
+    return resource;
+}
+
+std::string user_dictionary_fixture(std::string_view inventory_sha256) {
+    std::string resource =
+        "{\"admission\":\"local-user\",\"dialect\":\"en-AU\","
+        "\"entry_count\":3,"
+        "\"resource_id\":\"kilix-en-au-resolution-user-dictionary-test-1\","
+        "\"review_record_sha256\":null,"
+        "\"schema\":\"kilix.voicegen.pronunciation-lexicon/v1\","
+        "\"segment_inventory_sha256\":\"" +
+        std::string(inventory_sha256) + "\"}\n";
+    resource += pronunciation_entry(
+        "record", "[\"noun\"]",
+        "[{\"segments\":[\"T\"],\"stress\":\"primary\"}]");
+    resource += pronunciation_entry(
+        "cat", "[\"default\"]",
+        "[{\"segments\":[\"B\"],\"stress\":\"primary\"}]");
+    resource += pronunciation_entry(
+        "bat", "[\"noun\"]",
+        "[{\"segments\":[\"K\"],\"stress\":\"primary\"}]");
     return resource;
 }
 
@@ -184,11 +206,35 @@ struct LoadedResources final {
 
     kgv::ResolvedFrontendResources chain(
         kgv::PronunciationAdmission admission,
+        const kgv::PronunciationLexicon *user_dictionary = nullptr,
         std::string_view frontend_abi = kFrontendAbi) const {
-        return {&lexicon, &lts, &tokens, admission,
-                std::string(frontend_abi)};
+        kgv::ResolvedFrontendResources resources;
+        resources.base_lexicon = &lexicon;
+        resources.user_dictionary = user_dictionary;
+        resources.lts = &lts;
+        resources.model_tokens = &tokens;
+        resources.required_admission = admission;
+        resources.expected_frontend_abi_sha256 = frontend_abi;
+        return resources;
     }
 };
+
+kgv::PronunciationLexicon load_user_dictionary(
+    const std::vector<kgv::SegmentDefinition> &dictionary_segments) {
+    const std::string inventory_sha256 =
+        kgv::pronunciation_segment_inventory_sha256(dictionary_segments);
+    require(inventory_sha256.size() == 64U,
+            "user-dictionary inventory hash was not produced");
+    const std::string resource = user_dictionary_fixture(inventory_sha256);
+    kgv::PronunciationLexicon dictionary;
+    kgv::PronunciationResourceFailure failure;
+    require(kgv::load_pronunciation_lexicon(
+                resource, kgv::sha256_hex(resource), inventory_sha256,
+                kgv::PronunciationAdmission::local_user,
+                dictionary_segments, &dictionary, &failure) == KGV_OK,
+            "resolution user-dictionary fixture did not load");
+    return dictionary;
+}
 
 LoadedResources load_resources(
     kgv::PronunciationAdmission admission,
@@ -234,7 +280,9 @@ LoadedResources load_resources(
 
 void require_cleared(const kgv::ResolvedFrontendResult &result) {
     require(result.profile.empty() && result.input_bytes == 0U &&
+                result.request_override_count == 0U &&
                 result.frontend_abi_sha256.empty() &&
+                result.user_dictionary_sha256.empty() &&
                 result.pronunciation_lexicon_sha256.empty() &&
                 result.lts_sha256.empty() && result.words.empty() &&
                 result.phrases.empty() && result.diagnostics.empty() &&
@@ -264,11 +312,44 @@ void require_failure(std::string_view text,
     require_cleared(result);
 }
 
+void require_override_failure(
+    std::string_view text,
+    const kgv::ResolvedFrontendResources &resources,
+    const std::vector<std::string> &roles,
+    const std::vector<kgv::RequestPronunciationOverride> &overrides,
+    int expected_status,
+    std::string_view expected_code,
+    std::size_t expected_override) {
+    kgv::ResolvedFrontendResult result;
+    result.profile = "sentinel";
+    result.request_override_count = 1U;
+    result.words.push_back({});
+    kgv::ResolvedFrontendFailure failure;
+    const int status = kgv::run_resolved_frontend(
+        text, KGV_PROFILE_PROSE, resources, roles, overrides, &result,
+        &failure);
+    require(status == expected_status && failure.status == expected_status,
+            "request override failure returned the wrong status");
+    if (failure.code != expected_code) {
+        throw std::runtime_error("expected override failure " +
+                                 std::string(expected_code) + ", got " +
+                                 failure.code);
+    }
+    require(failure.has_override &&
+                failure.override_index == expected_override,
+            "request override failure lost its override index");
+    require_cleared(result);
+}
+
 void require_same(const kgv::ResolvedFrontendResult &left,
                   const kgv::ResolvedFrontendResult &right) {
     require(left.profile == right.profile &&
                 left.input_bytes == right.input_bytes &&
+                left.request_override_count ==
+                    right.request_override_count &&
                 left.frontend_abi_sha256 == right.frontend_abi_sha256 &&
+                left.user_dictionary_sha256 ==
+                    right.user_dictionary_sha256 &&
                 left.pronunciation_lexicon_sha256 ==
                     right.pronunciation_lexicon_sha256 &&
                 left.lts_sha256 == right.lts_sha256 &&
@@ -284,6 +365,9 @@ void require_same(const kgv::ResolvedFrontendResult &left,
         require(a.normalized == b.normalized &&
                     a.source_kind == b.source_kind && a.role == b.role &&
                     a.pronunciation_source == b.pronunciation_source &&
+                    a.request_override_kind == b.request_override_kind &&
+                    a.request_override_index == b.request_override_index &&
+                    a.has_request_override == b.has_request_override &&
                     a.span.byte_start == b.span.byte_start &&
                     a.span.byte_end == b.span.byte_end &&
                     a.syllables.size() == b.syllables.size(),
@@ -334,7 +418,9 @@ int main() {
                     noun_roles, &result, &failure) == KGV_OK,
                 "integrated resolved frontend rejected a valid request");
         require(failure.code.empty() && result.profile == "prose" &&
-                    result.input_bytes == 15U && result.words.size() == 3U &&
+                    result.input_bytes == 15U &&
+                    result.request_override_count == 0U &&
+                    result.words.size() == 3U &&
                     result.phrases.size() == 1U,
                 "integrated frontend metadata changed");
         require(result.frontend_abi_sha256 == kFrontendAbi &&
@@ -348,6 +434,7 @@ int main() {
                     result.words[0U].role == "noun" &&
                     result.words[0U].pronunciation_source ==
                         kgv::ResolvedPronunciationSource::base_lexicon &&
+                    !result.words[0U].has_request_override &&
                     result.words[0U].syllables[0U].segment_ids ==
                         std::vector<std::uint16_t>({1U}),
                 "role-qualified lexicon resolution changed");
@@ -378,6 +465,295 @@ int main() {
                     noun_roles, &repeated, &failure) == KGV_OK,
                 "repeated resolved frontend failed");
         require_same(result, repeated);
+
+        {
+            const kgv::PronunciationLexicon user_dictionary =
+                load_user_dictionary(segments());
+            const kgv::ResolvedFrontendResources user_resources =
+                loaded.chain(kgv::PronunciationAdmission::test_fixture,
+                             &user_dictionary);
+            kgv::ResolvedFrontendResult overridden;
+            const std::vector<std::string> roles = {"noun", "default"};
+            require(kgv::run_resolved_frontend(
+                        "Record cat.", KGV_PROFILE_PROSE, user_resources,
+                        roles, &overridden, &failure) == KGV_OK,
+                    "valid explicit user dictionary was rejected");
+            require(overridden.user_dictionary_sha256 ==
+                        user_dictionary.resource_sha256() &&
+                        overridden.pronunciation_lexicon_sha256 ==
+                            loaded.lexicon.resource_sha256() &&
+                        overridden.words.size() == 2U &&
+                        overridden.words[0U].pronunciation_source ==
+                            kgv::ResolvedPronunciationSource::user_dictionary &&
+                        overridden.words[1U].pronunciation_source ==
+                            kgv::ResolvedPronunciationSource::user_dictionary &&
+                        overridden.words[0U].syllables[0U].segment_ids ==
+                            std::vector<std::uint16_t>({3U}) &&
+                        overridden.words[1U].syllables[0U].segment_ids ==
+                            std::vector<std::uint16_t>({4U}),
+                    "user dictionary did not precede the base lexicon");
+            require(overridden.model_tokens.chunks.size() == 1U &&
+                        overridden.model_tokens.chunks[0U].ids ==
+                            std::vector<std::uint16_t>({
+                                1U, 3U, 4U, 6U, 19U,
+                                3U, 4U, 6U, 20U, 12U, 2U,
+                            }),
+                    "user dictionary did not reach exact model IDs");
+            require(std::string(kgv::resolved_pronunciation_source_name(
+                        overridden.words[0U].pronunciation_source)) ==
+                        "USER_DICTIONARY",
+                    "user-dictionary pronunciation source name changed");
+
+            kgv::ResolvedFrontendResult base_variant;
+            require(kgv::run_resolved_frontend(
+                        "Record.", KGV_PROFILE_PROSE, user_resources,
+                        {"verb"}, &base_variant, &failure) == KGV_OK &&
+                        base_variant.words.size() == 1U &&
+                        base_variant.words[0U].pronunciation_source ==
+                            kgv::ResolvedPronunciationSource::base_lexicon &&
+                        base_variant.words[0U].syllables[0U].segment_ids ==
+                            std::vector<std::uint16_t>({4U}),
+                    "missing user role did not defer to the base lexicon");
+
+            kgv::ResolvedFrontendResult defaulted_user;
+            require(kgv::run_resolved_frontend(
+                        "cat.", KGV_PROFILE_PROSE, user_resources, {"noun"},
+                        &defaulted_user, &failure) == KGV_OK &&
+                        defaulted_user.words[0U].pronunciation_source ==
+                            kgv::ResolvedPronunciationSource::user_dictionary &&
+                        defaulted_user.diagnostics.size() == 1U &&
+                        defaulted_user.diagnostics[0U].code ==
+                            "HETERONYM_DEFAULTED",
+                    "user dictionary default did not surface role fallback");
+
+            require_failure("bat.", user_resources, {"verb"},
+                            KGV_INVALID_TEXT,
+                            "AMBIGUOUS_PRONUNCIATION_ROLE");
+
+            kgv::ResolvedFrontendResult repeated_user;
+            require(kgv::run_resolved_frontend(
+                        "Record cat.", KGV_PROFILE_PROSE, user_resources,
+                        roles, &repeated_user, &failure) == KGV_OK,
+                    "repeated user-dictionary resolution failed");
+            require_same(overridden, repeated_user);
+
+            kgv::RequestPronunciationOverride phone_override;
+            phone_override.span = kgv::SourceSpan{7U, 10U};
+            phone_override.kind =
+                kgv::RequestOverrideKind::phone_syllables;
+            phone_override.syllables = {{
+                kgv::SyllableStress::primary,
+                std::vector<std::uint16_t>({2U}),
+            }};
+            const std::vector<kgv::RequestPronunciationOverride>
+                phone_overrides = {phone_override};
+            kgv::ResolvedFrontendResult request_overridden;
+            require(kgv::run_resolved_frontend(
+                        "Record cat.", KGV_PROFILE_PROSE, user_resources,
+                        roles, phone_overrides, &request_overridden,
+                        &failure) == KGV_OK,
+                    "valid typed phone override was rejected");
+            require(request_overridden.request_override_count == 1U &&
+                        request_overridden.words.size() == 2U &&
+                        request_overridden.words[0U].pronunciation_source ==
+                            kgv::ResolvedPronunciationSource::user_dictionary &&
+                        request_overridden.words[1U].pronunciation_source ==
+                            kgv::ResolvedPronunciationSource::request_override &&
+                        request_overridden.words[1U].has_request_override &&
+                        request_overridden.words[1U].request_override_kind ==
+                            kgv::RequestOverrideKind::phone_syllables &&
+                        request_overridden.words[1U].request_override_index ==
+                            0U &&
+                        request_overridden.words[1U]
+                                .syllables[0U].segment_ids ==
+                            std::vector<std::uint16_t>({2U}),
+                    "request override did not precede the user dictionary");
+            require(request_overridden.model_tokens.chunks.size() == 1U &&
+                        request_overridden.model_tokens.chunks[0U].ids ==
+                            std::vector<std::uint16_t>({
+                                1U, 3U, 4U, 6U, 19U,
+                                3U, 4U, 6U, 18U, 12U, 2U,
+                            }) &&
+                        std::string(
+                            kgv::resolved_pronunciation_source_name(
+                                request_overridden.words[1U]
+                                    .pronunciation_source)) ==
+                            "REQUEST_OVERRIDE",
+                    "typed phone override did not reach exact model IDs");
+
+            kgv::ResolvedFrontendResult repeated_request;
+            require(kgv::run_resolved_frontend(
+                        "Record cat.", KGV_PROFILE_PROSE, user_resources,
+                        roles, phone_overrides, &repeated_request,
+                        &failure) == KGV_OK,
+                    "repeated typed phone override failed");
+            require_same(request_overridden, repeated_request);
+        }
+
+        {
+            kgv::RequestPronunciationOverride replacement;
+            replacement.span = kgv::SourceSpan{0U, 3U};
+            replacement.kind = kgv::RequestOverrideKind::replacement_text;
+            replacement.replacement_text = "cat";
+            kgv::ResolvedFrontendResult replaced;
+            require(kgv::run_resolved_frontend(
+                        "dog.", KGV_PROFILE_PROSE, resources, {},
+                        {replacement}, &replaced, &failure) == KGV_OK,
+                    "valid replacement-text override was rejected");
+            require(replaced.input_bytes == 4U &&
+                        replaced.request_override_count == 1U &&
+                        replaced.words.size() == 1U &&
+                        replaced.words[0U].normalized == "cat" &&
+                        replaced.words[0U].span.byte_start == 0U &&
+                        replaced.words[0U].span.byte_end == 3U &&
+                        replaced.words[0U].has_request_override &&
+                        replaced.words[0U].request_override_kind ==
+                            kgv::RequestOverrideKind::replacement_text &&
+                        replaced.words[0U].request_override_index == 0U &&
+                        replaced.words[0U].pronunciation_source ==
+                            kgv::ResolvedPronunciationSource::base_lexicon,
+                    "replacement text did not re-enter lexical resolution");
+
+            replacement.span = kgv::SourceSpan{0U, 1U};
+            replacement.replacement_text = "Record cat";
+            kgv::ResolvedFrontendResult expanded_replacement;
+            require(kgv::run_resolved_frontend(
+                        "X.", KGV_PROFILE_PROSE, resources,
+                        {"noun", "default"}, {replacement},
+                        &expanded_replacement, &failure) == KGV_OK,
+                    "multiword replacement-text override was rejected");
+            require(expanded_replacement.input_bytes == 2U &&
+                        expanded_replacement.words.size() == 2U &&
+                        expanded_replacement.words[0U].normalized == "Record" &&
+                        expanded_replacement.words[1U].normalized == "cat" &&
+                        expanded_replacement.words[0U].span.byte_start == 0U &&
+                        expanded_replacement.words[0U].span.byte_end == 1U &&
+                        expanded_replacement.words[1U].span.byte_start == 0U &&
+                        expanded_replacement.words[1U].span.byte_end == 1U &&
+                        expanded_replacement.words[0U].has_request_override &&
+                        expanded_replacement.words[1U].has_request_override &&
+                        expanded_replacement.phrases.size() == 1U &&
+                        expanded_replacement.phrases[0U].span.byte_start == 0U &&
+                        expanded_replacement.phrases[0U].span.byte_end == 2U,
+                    "multiword replacement lost original source provenance");
+
+            kgv::RequestPronunciationOverride shifted_phone;
+            shifted_phone.span = kgv::SourceSpan{4U, 7U};
+            shifted_phone.kind =
+                kgv::RequestOverrideKind::phone_syllables;
+            shifted_phone.syllables = {{
+                kgv::SyllableStress::primary,
+                std::vector<std::uint16_t>({2U}),
+            }};
+            replacement.span = kgv::SourceSpan{0U, 3U};
+            replacement.replacement_text = "Record";
+            kgv::ResolvedFrontendResult shifted;
+            require(kgv::run_resolved_frontend(
+                        "dog cat.", KGV_PROFILE_PROSE, resources,
+                        {"noun", "default"},
+                        {replacement, shifted_phone}, &shifted,
+                        &failure) == KGV_OK,
+                    "replacement before a phone override was rejected");
+            require(shifted.request_override_count == 2U &&
+                        shifted.words.size() == 2U &&
+                        shifted.words[0U].normalized == "Record" &&
+                        shifted.words[0U].span.byte_start == 0U &&
+                        shifted.words[0U].span.byte_end == 3U &&
+                        shifted.words[0U].request_override_index == 0U &&
+                        shifted.words[1U].normalized == "cat" &&
+                        shifted.words[1U].span.byte_start == 4U &&
+                        shifted.words[1U].span.byte_end == 7U &&
+                        shifted.words[1U].request_override_index == 1U &&
+                        shifted.words[1U].pronunciation_source ==
+                            kgv::ResolvedPronunciationSource::request_override &&
+                        shifted.words[1U].syllables[0U].segment_ids ==
+                            std::vector<std::uint16_t>({2U}),
+                    "override remapping drifted after a length-changing replacement");
+        }
+
+        {
+            kgv::RequestPronunciationOverride first;
+            first.span = kgv::SourceSpan{0U, 2U};
+            first.replacement_text = "cat";
+            kgv::RequestPronunciationOverride second;
+            second.span = kgv::SourceSpan{1U, 3U};
+            second.replacement_text = "cat";
+            require_override_failure(
+                "cat.", resources, {}, {first, second}, KGV_INVALID_TEXT,
+                "OVERLAPPING_OVERRIDE", 1U);
+        }
+        {
+            kgv::RequestPronunciationOverride split_utf8;
+            split_utf8.span = kgv::SourceSpan{4U, 5U};
+            split_utf8.replacement_text = "cat";
+            require_override_failure(
+                "caf\xc3\xa9.", resources, {}, {split_utf8},
+                KGV_INVALID_TEXT, "INVALID_OVERRIDE_BOUNDARY", 0U);
+        }
+        {
+            kgv::RequestPronunciationOverride split_grapheme;
+            split_grapheme.span = kgv::SourceSpan{0U, 1U};
+            split_grapheme.replacement_text = "cat";
+            require_override_failure(
+                "e\xcc\x81.", resources, {}, {split_grapheme},
+                KGV_INVALID_TEXT, "INVALID_OVERRIDE_BOUNDARY", 0U);
+        }
+        {
+            kgv::RequestPronunciationOverride unknown_segment;
+            unknown_segment.span = kgv::SourceSpan{0U, 3U};
+            unknown_segment.kind =
+                kgv::RequestOverrideKind::phone_syllables;
+            unknown_segment.syllables = {{
+                kgv::SyllableStress::primary,
+                std::vector<std::uint16_t>({99U}),
+            }};
+            require_override_failure(
+                "cat.", resources, {}, {unknown_segment}, KGV_INVALID_TEXT,
+                "UNKNOWN_OVERRIDE_SEGMENT", 0U);
+        }
+        {
+            kgv::RequestPronunciationOverride nonword_phone;
+            nonword_phone.span = kgv::SourceSpan{0U, 4U};
+            nonword_phone.kind =
+                kgv::RequestOverrideKind::phone_syllables;
+            nonword_phone.syllables = {{
+                kgv::SyllableStress::primary,
+                std::vector<std::uint16_t>({1U}),
+            }};
+            require_override_failure(
+                "cat.", resources, {}, {nonword_phone}, KGV_INVALID_TEXT,
+                "INVALID_PHONE_OVERRIDE_TARGET", 0U);
+        }
+        {
+            kgv::RequestPronunciationOverride expanded_phone;
+            expanded_phone.span = kgv::SourceSpan{0U, 2U};
+            expanded_phone.kind =
+                kgv::RequestOverrideKind::phone_syllables;
+            expanded_phone.syllables = {{
+                kgv::SyllableStress::primary,
+                std::vector<std::uint16_t>({1U}),
+            }};
+            require_override_failure(
+                "21.", resources, {}, {expanded_phone}, KGV_INVALID_TEXT,
+                "INVALID_PHONE_OVERRIDE_TARGET", 0U);
+        }
+        {
+            kgv::RequestPronunciationOverride invalid_replacement;
+            invalid_replacement.span = kgv::SourceSpan{4U, 7U};
+            invalid_replacement.replacement_text.assign(1U,
+                                                        static_cast<char>(0xff));
+            require_override_failure(
+                "cat dog.", resources, {}, {invalid_replacement},
+                KGV_INVALID_TEXT, "INVALID_UTF8", 0U);
+        }
+        {
+            kgv::RequestPronunciationOverride ambiguous_replacement;
+            ambiguous_replacement.span = kgv::SourceSpan{0U, 3U};
+            ambiguous_replacement.replacement_text = "Record";
+            require_override_failure(
+                "dog.", resources, {}, {ambiguous_replacement},
+                KGV_INVALID_TEXT, "AMBIGUOUS_PRONUNCIATION_ROLE", 0U);
+        }
 
         for (std::string_view silent : {std::string_view{},
                                         std::string_view{" \t\r\n"}}) {
@@ -461,6 +837,29 @@ int main() {
                             "FRONTEND_RESOURCE_ADMISSION_MISMATCH");
         }
         {
+            kgv::PronunciationLexicon unloaded_dictionary;
+            kgv::ResolvedFrontendResources invalid = resources;
+            invalid.user_dictionary = &unloaded_dictionary;
+            require_failure("cat.", invalid, {}, KGV_INVALID_STATE,
+                            "FRONTEND_USER_DICTIONARY_NOT_LOADED");
+        }
+        {
+            kgv::ResolvedFrontendResources invalid = resources;
+            invalid.user_dictionary = &loaded.lexicon;
+            require_failure("cat.", invalid, {}, KGV_ABI_MISMATCH,
+                            "FRONTEND_USER_DICTIONARY_ADMISSION_MISMATCH");
+        }
+        {
+            std::vector<kgv::SegmentDefinition> alternate_segments = segments();
+            alternate_segments.push_back({"D", 5U});
+            const kgv::PronunciationLexicon wrong_inventory =
+                load_user_dictionary(alternate_segments);
+            kgv::ResolvedFrontendResources invalid = resources;
+            invalid.user_dictionary = &wrong_inventory;
+            require_failure("cat.", invalid, {}, KGV_ABI_MISMATCH,
+                            "FRONTEND_USER_DICTIONARY_INVENTORY_MISMATCH");
+        }
+        {
             const std::string review_a(64U, 'a');
             const std::string review_b(64U, 'b');
             const LoadedResources product = load_resources(
@@ -470,6 +869,26 @@ int main() {
                 "cat.",
                 product.chain(kgv::PronunciationAdmission::product_admitted),
                 {}, KGV_ABI_MISMATCH, "FRONTEND_REVIEW_RECORD_MISMATCH");
+        }
+        {
+            const std::string review(64U, 'a');
+            const LoadedResources product = load_resources(
+                kgv::PronunciationAdmission::product_admitted, review,
+                review);
+            const kgv::PronunciationLexicon user_dictionary =
+                load_user_dictionary(segments());
+            kgv::ResolvedFrontendResult product_user;
+            require(kgv::run_resolved_frontend(
+                        "cat.", KGV_PROFILE_PROSE,
+                        product.chain(
+                            kgv::PronunciationAdmission::product_admitted,
+                            &user_dictionary),
+                        {}, &product_user, &failure) == KGV_OK &&
+                        product_user.words.size() == 1U &&
+                        product_user.words[0U].pronunciation_source ==
+                            kgv::ResolvedPronunciationSource::user_dictionary,
+                    "local user dictionary was not admitted above a valid "
+                    "product chain");
         }
 
         std::mt19937_64 generator(0x4b47562d5245534fULL);
@@ -503,7 +922,11 @@ int main() {
                             second_failure.span.byte_end &&
                         first_failure.word_index ==
                             second_failure.word_index &&
-                        first_failure.has_word == second_failure.has_word,
+                        first_failure.has_word == second_failure.has_word &&
+                        first_failure.override_index ==
+                            second_failure.override_index &&
+                        first_failure.has_override ==
+                            second_failure.has_override,
                     "resolved frontend fuzz result was nondeterministic");
             if (first_status == KGV_OK) {
                 require_same(first, second);
@@ -511,6 +934,58 @@ int main() {
                 require_cleared(first);
                 require_cleared(second);
             }
+        }
+
+        constexpr std::array<kgv::SourceSpan, 4U> override_spans = {{
+            {0U, 3U}, {4U, 7U}, {8U, 11U}, {12U, 15U},
+        }};
+        for (std::size_t iteration = 0U; iteration < 2000U; ++iteration) {
+            std::size_t first_index = static_cast<std::size_t>(
+                generator() % override_spans.size());
+            std::size_t second_index = static_cast<std::size_t>(
+                generator() % override_spans.size());
+            if (second_index == first_index) {
+                second_index = (second_index + 1U) % override_spans.size();
+            }
+            if (second_index < first_index) {
+                std::swap(first_index, second_index);
+            }
+            std::vector<kgv::RequestPronunciationOverride> overrides;
+            for (std::size_t selected : {first_index, second_index}) {
+                kgv::RequestPronunciationOverride entry;
+                entry.span = override_spans[selected];
+                if ((generator() & 1U) == 0U) {
+                    entry.kind = kgv::RequestOverrideKind::replacement_text;
+                    entry.replacement_text =
+                        (generator() & 1U) == 0U ? "cat" : "bat";
+                } else {
+                    entry.kind = kgv::RequestOverrideKind::phone_syllables;
+                    entry.syllables = {{
+                        kgv::SyllableStress::primary,
+                        std::vector<std::uint16_t>({
+                            static_cast<std::uint16_t>(
+                                1U + (generator() % 4U)),
+                        }),
+                    }};
+                }
+                overrides.push_back(std::move(entry));
+            }
+            kgv::ResolvedFrontendResult first;
+            kgv::ResolvedFrontendResult second;
+            kgv::ResolvedFrontendFailure first_failure;
+            kgv::ResolvedFrontendFailure second_failure;
+            const int first_status = kgv::run_resolved_frontend(
+                "cat bat cat bat.", KGV_PROFILE_PROSE, resources, {},
+                overrides, &first, &first_failure);
+            const int second_status = kgv::run_resolved_frontend(
+                "cat bat cat bat.", KGV_PROFILE_PROSE, resources, {},
+                overrides, &second, &second_failure);
+            require(first_status == KGV_OK && second_status == KGV_OK &&
+                        first_failure.code.empty() &&
+                        second_failure.code.empty() &&
+                        first.request_override_count == 2U,
+                    "valid randomized override request failed");
+            require_same(first, second);
         }
 
         std::cout << "resolved frontend integration tests passed\n";

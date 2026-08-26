@@ -138,8 +138,17 @@ and requires product lexicon/LTS review hashes to agree. It resolves
 role-qualified lexicon entries before LTS, retains per-word provenance, and
 feeds the result directly into bounded token packing with no partial output on
 failure. A known grapheme with unresolved role variants fails as ambiguous
-instead of falling through to LTS. This seam uses synthetic fixtures only and
-is not yet called by the public synthesis engine.
+instead of falling through to LTS. An optional explicitly loaded `local-user`
+dictionary now precedes the product/base lexicon without weakening the admitted
+base/LTS chain; its exact resource hash remains in the result. Typed request
+overrides precede that dictionary: exact phone-syllable records must target one
+spoken word and use the installed segment inventory, while replacement text
+re-enters lexical scanning once. Replacement words, phrases, diagnostics, and
+failures are mapped back to the original request byte span, and override
+boundaries may not split a Unicode grapheme. Overlap, malformed replacement
+text, an unknown segment, or an ambiguous phone target fails with the indexed
+override and no partial output. This seam uses synthetic fixtures only and is
+not yet called by the public synthesis engine.
 
 `tools/build_en_au_lexicon_candidate.py` converts an explicitly hashed CMUdict
 snapshot into a deterministic candidate and Australian-review queue outside the

@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "frontend/lts.h"
+#include "frontend/overrides.h"
 #include "frontend/pipeline.h"
 #include "frontend/pronunciation.h"
 #include "frontend/tokenization.h"
@@ -15,6 +16,8 @@
 namespace kgv {
 
 enum class ResolvedPronunciationSource {
+    request_override,
+    user_dictionary,
     base_lexicon,
     product_lexicon,
     lts,
@@ -27,12 +30,17 @@ struct ResolvedFrontendWord final {
     std::string role;
     ResolvedPronunciationSource pronunciation_source =
         ResolvedPronunciationSource::base_lexicon;
+    RequestOverrideKind request_override_kind =
+        RequestOverrideKind::replacement_text;
+    std::size_t request_override_index = 0U;
+    bool has_request_override = false;
     SourceSpan span;
     std::vector<PronunciationSyllable> syllables;
 };
 
 struct ResolvedFrontendResources final {
     const PronunciationLexicon *base_lexicon = nullptr;
+    const PronunciationLexicon *user_dictionary = nullptr;
     const LtsModel *lts = nullptr;
     const ModelTokenInventory *model_tokens = nullptr;
     PronunciationAdmission required_admission =
@@ -43,7 +51,9 @@ struct ResolvedFrontendResources final {
 struct ResolvedFrontendResult final {
     std::string profile;
     std::size_t input_bytes = 0U;
+    std::size_t request_override_count = 0U;
     std::string frontend_abi_sha256;
+    std::string user_dictionary_sha256;
     std::string pronunciation_lexicon_sha256;
     std::string lts_sha256;
     std::vector<ResolvedFrontendWord> words;
@@ -59,7 +69,18 @@ struct ResolvedFrontendFailure final {
     SourceSpan span;
     std::size_t word_index = 0U;
     bool has_word = false;
+    std::size_t override_index = 0U;
+    bool has_override = false;
 };
+
+int run_resolved_frontend(
+    std::string_view text,
+    std::uint32_t profile,
+    const ResolvedFrontendResources &resources,
+    const std::vector<std::string> &word_roles,
+    const std::vector<RequestPronunciationOverride> &request_overrides,
+    ResolvedFrontendResult *result,
+    ResolvedFrontendFailure *failure);
 
 int run_resolved_frontend(
     std::string_view text,

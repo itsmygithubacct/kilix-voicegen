@@ -21,7 +21,9 @@ int reject(ResolvedFrontendResult *result,
            std::string message,
            SourceSpan span = {},
            std::size_t word_index = 0U,
-           bool has_word = false) {
+           bool has_word = false,
+           std::size_t override_index = 0U,
+           bool has_override = false) {
     if (result != nullptr) {
         *result = ResolvedFrontendResult{};
     }
@@ -32,6 +34,8 @@ int reject(ResolvedFrontendResult *result,
         failure->span = span;
         failure->word_index = word_index;
         failure->has_word = has_word;
+        failure->override_index = override_index;
+        failure->has_override = has_override;
     }
     return status;
 }
@@ -126,6 +130,32 @@ int validate_resources(const ResolvedFrontendResources &resources,
                       "FRONTEND_SEGMENT_INVENTORY_MISMATCH",
                       "frontend resources do not share one segment inventory");
     }
+    if (resources.user_dictionary != nullptr) {
+        const PronunciationLexicon &dictionary = *resources.user_dictionary;
+        if (dictionary.resource_sha256().empty() ||
+            dictionary.entry_count() == 0U) {
+            return reject(result, failure, KGV_INVALID_STATE,
+                          "FRONTEND_USER_DICTIONARY_NOT_LOADED",
+                          "explicit user dictionary is not loaded");
+        }
+        if (dictionary.admission() !=
+            PronunciationAdmission::local_user) {
+            return reject(result, failure, KGV_ABI_MISMATCH,
+                          "FRONTEND_USER_DICTIONARY_ADMISSION_MISMATCH",
+                          "explicit user dictionary is not a local-user resource");
+        }
+        if (dictionary.segment_inventory_sha256() !=
+            lexicon.segment_inventory_sha256()) {
+            return reject(result, failure, KGV_ABI_MISMATCH,
+                          "FRONTEND_USER_DICTIONARY_INVENTORY_MISMATCH",
+                          "user dictionary targets another segment inventory");
+        }
+        if (!dictionary.review_record_sha256().empty()) {
+            return reject(result, failure, KGV_ABI_MISMATCH,
+                          "FRONTEND_USER_DICTIONARY_REVIEW_MISMATCH",
+                          "local user dictionary must not claim product review");
+        }
+    }
     if (lts.source_lexicon_sha256() != lexicon.resource_sha256()) {
         return reject(result, failure, KGV_ABI_MISMATCH,
                       "FRONTEND_LTS_LEXICON_MISMATCH",
@@ -150,7 +180,11 @@ int validate_resources(const ResolvedFrontendResources &resources,
 
 ResolvedPronunciationSource lexicon_source(
     PronunciationAdmission admission,
-    std::string_view lexical_source_kind) noexcept {
+    std::string_view lexical_source_kind,
+    bool user_dictionary) noexcept {
+    if (user_dictionary) {
+        return ResolvedPronunciationSource::user_dictionary;
+    }
     if (lexical_source_kind == "SPELLING") {
         return ResolvedPronunciationSource::spelling;
     }
@@ -166,6 +200,7 @@ int run_resolved_frontend(
     std::uint32_t profile,
     const ResolvedFrontendResources &resources,
     const std::vector<std::string> &word_roles,
+    const std::vector<RequestPronunciationOverride> &request_overrides,
     ResolvedFrontendResult *result,
     ResolvedFrontendFailure *failure) {
     if (result == nullptr || failure == nullptr) {
@@ -180,16 +215,18 @@ int run_resolved_frontend(
         return resource_status;
     }
 
-    LexicalFrontendResult lexical;
-    FrontendFailure lexical_failure;
-    const int lexical_status =
-        run_lexical_frontend(text, profile, &lexical, &lexical_failure);
+    OverrideLexicalResult overridden_lexical;
+    RequestOverrideFailure override_failure;
+    const int lexical_status = run_override_lexical_frontend(
+        text, profile, request_overrides, *resources.model_tokens,
+        &overridden_lexical, &override_failure);
     if (lexical_status != KGV_OK) {
-        return reject(result, failure, lexical_status, lexical_failure.code,
-                      lexical_failure.message,
-                      SourceSpan{lexical_failure.byte_offset,
-                                 lexical_failure.byte_offset});
+        return reject(result, failure, lexical_status, override_failure.code,
+                      override_failure.message, override_failure.span, 0U,
+                      false, override_failure.override_index,
+                      override_failure.has_override);
     }
+    LexicalFrontendResult &lexical = overridden_lexical.lexical;
     if (!word_roles.empty() && word_roles.size() != lexical.words.size()) {
         return reject(result, failure, KGV_INVALID_ARGUMENT,
                       "FRONTEND_ROLE_COUNT_MISMATCH",
@@ -198,7 +235,12 @@ int run_resolved_frontend(
 
     result->profile = lexical.profile;
     result->input_bytes = lexical.input_bytes;
+    result->request_override_count = request_overrides.size();
     result->frontend_abi_sha256 = resources.expected_frontend_abi_sha256;
+    if (resources.user_dictionary != nullptr) {
+        result->user_dictionary_sha256 =
+            resources.user_dictionary->resource_sha256();
+    }
     result->pronunciation_lexicon_sha256 =
         resources.base_lexicon->resource_sha256();
     result->lts_sha256 = resources.lts->resource_sha256();
@@ -224,37 +266,89 @@ int run_resolved_frontend(
         resolved.source_kind = lexical_word.source_kind;
         resolved.role = role;
         resolved.span = lexical_word.span;
-        const PronunciationEntry *entry =
-            resources.base_lexicon->find(lexical_word.normalized, role);
-        if (entry != nullptr) {
+        if (overridden_lexical.replacement_override_by_word[index]
+                .has_value()) {
+            resolved.request_override_kind =
+                RequestOverrideKind::replacement_text;
+            resolved.request_override_index =
+                *overridden_lexical.replacement_override_by_word[index];
+            resolved.has_request_override = true;
+        }
+        if (overridden_lexical.phone_override_by_word[index].has_value()) {
+            resolved.request_override_kind =
+                RequestOverrideKind::phone_syllables;
+            resolved.request_override_index =
+                *overridden_lexical.phone_override_by_word[index];
+            resolved.has_request_override = true;
+            resolved.syllables = request_overrides[
+                resolved.request_override_index].syllables;
+            resolved.pronunciation_source =
+                ResolvedPronunciationSource::request_override;
+        }
+        const PronunciationLexicon *selected_lexicon = nullptr;
+        const PronunciationEntry *entry = nullptr;
+        if (resolved.pronunciation_source !=
+                ResolvedPronunciationSource::request_override &&
+            resources.user_dictionary != nullptr) {
+            entry = resources.user_dictionary->find(lexical_word.normalized,
+                                                     role);
+            if (entry != nullptr) {
+                selected_lexicon = resources.user_dictionary;
+            }
+        }
+        if (resolved.pronunciation_source !=
+                ResolvedPronunciationSource::request_override &&
+            entry == nullptr) {
+            entry = resources.base_lexicon->find(lexical_word.normalized, role);
+            if (entry != nullptr) {
+                selected_lexicon = resources.base_lexicon;
+            }
+        }
+        if (resolved.pronunciation_source ==
+            ResolvedPronunciationSource::request_override) {
+            // The typed request pronunciation is already validated against
+            // the exact model inventory and wins over every persistent layer.
+        } else if (entry != nullptr) {
             resolved.syllables = entry->syllables;
             resolved.pronunciation_source = lexicon_source(
-                resources.required_admission, lexical_word.source_kind);
+                resources.required_admission, lexical_word.source_kind,
+                selected_lexicon == resources.user_dictionary);
             if (role != "default" && !contains_role(*entry, role)) {
                 result->diagnostics.push_back(FrontendDiagnostic{
                     "HETERONYM_DEFAULTED", "WARNING", lexical_word.span,
                 });
             }
         } else {
-            if (resources.base_lexicon->contains_grapheme(
+            const bool user_knows_grapheme =
+                resources.user_dictionary != nullptr &&
+                resources.user_dictionary->contains_grapheme(
+                    lexical_word.normalized);
+            if (user_knows_grapheme ||
+                resources.base_lexicon->contains_grapheme(
                     lexical_word.normalized)) {
                 return reject(result, failure, KGV_INVALID_TEXT,
                               "AMBIGUOUS_PRONUNCIATION_ROLE",
                               "known word lacks a reviewed pronunciation for its role",
-                              lexical_word.span, index, true);
+                              lexical_word.span, index, true,
+                              resolved.request_override_index,
+                              resolved.has_request_override);
             }
             if (lexical_word.source_kind == "SPELLING") {
                 return reject(result, failure, KGV_INVALID_TEXT,
                               "UNKNOWN_PRONUNCIATION",
                               "spelled word lacks an admitted letter-name pronunciation",
-                              lexical_word.span, index, true);
+                              lexical_word.span, index, true,
+                              resolved.request_override_index,
+                              resolved.has_request_override);
             }
             std::string key;
             if (!lts_key(lexical_word.normalized, &key)) {
                 return reject(result, failure, KGV_INVALID_TEXT,
                               "UNKNOWN_PRONUNCIATION",
                               "word has no admitted lexicon or LTS pronunciation",
-                              lexical_word.span, index, true);
+                              lexical_word.span, index, true,
+                              resolved.request_override_index,
+                              resolved.has_request_override);
             }
             LtsFailure lts_failure;
             const int lts_status =
@@ -264,11 +358,14 @@ int run_resolved_frontend(
                     return reject(result, failure, KGV_INVALID_TEXT,
                                   "UNKNOWN_PRONUNCIATION",
                                   "word has no admitted lexicon or LTS pronunciation",
-                                  lexical_word.span, index, true);
+                                  lexical_word.span, index, true,
+                                  resolved.request_override_index,
+                                  resolved.has_request_override);
                 }
                 return reject(result, failure, lts_status, lts_failure.code,
                               lts_failure.message, lexical_word.span, index,
-                              true);
+                              true, resolved.request_override_index,
+                              resolved.has_request_override);
             }
             resolved.pronunciation_source = ResolvedPronunciationSource::lts;
         }
@@ -307,6 +404,10 @@ int run_resolved_frontend(
 const char *resolved_pronunciation_source_name(
     ResolvedPronunciationSource value) noexcept {
     switch (value) {
+        case ResolvedPronunciationSource::request_override:
+            return "REQUEST_OVERRIDE";
+        case ResolvedPronunciationSource::user_dictionary:
+            return "USER_DICTIONARY";
         case ResolvedPronunciationSource::base_lexicon:
             return "BASE_LEXICON";
         case ResolvedPronunciationSource::product_lexicon:
@@ -315,6 +416,18 @@ const char *resolved_pronunciation_source_name(
         case ResolvedPronunciationSource::spelling: return "SPELLING";
     }
     return "UNKNOWN";
+}
+
+int run_resolved_frontend(
+    std::string_view text,
+    std::uint32_t profile,
+    const ResolvedFrontendResources &resources,
+    const std::vector<std::string> &word_roles,
+    ResolvedFrontendResult *result,
+    ResolvedFrontendFailure *failure) {
+    static const std::vector<RequestPronunciationOverride> no_overrides;
+    return run_resolved_frontend(text, profile, resources, word_roles,
+                                 no_overrides, result, failure);
 }
 
 }  // namespace kgv

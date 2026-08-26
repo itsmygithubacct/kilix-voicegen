@@ -86,6 +86,7 @@ kgv_sanitizers(kilix_voicegen_support)
 add_library(kilix_voicegen_frontend STATIC
   src/frontend/frontend.cpp
   src/frontend/lts.cpp
+  src/frontend/overrides.cpp
   src/frontend/pipeline.cpp
   src/frontend/pronunciation.cpp
   src/frontend/resolution.cpp
