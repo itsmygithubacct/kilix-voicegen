@@ -31,6 +31,10 @@ struct VerifiedModel final {
     std::string frontend_abi_sha256;
     std::vector<VerifiedPayload> payloads;
     std::uint32_t sample_rate = 0U;
+    std::uint32_t model_sample_rate = 0U;
+    std::uint32_t noise_scale_milli = 0U;
+    std::uint32_t noise_w_milli = 0U;
+    std::uint16_t target_id_max = 0U;
     std::string deterministic_test_sha256;
 
     const VerifiedPayload *payload_for_role(std::string_view role) const noexcept;

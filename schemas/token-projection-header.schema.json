@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:kilix:voicegen:schema:token-projection-header:v1",
+  "title": "Kilix Voicegen Piper token-projection JSONL header",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "resource_id", "engine_kind", "source_token_inventory_sha256", "entry_count", "maximum_output_tokens", "target_id_max"],
+  "properties": {
+    "schema": {"const": "kilix.voicegen.token-projection/v1"},
+    "resource_id": {"type": "string", "pattern": "^[a-z][a-z0-9._-]{0,127}$"},
+    "engine_kind": {"const": "piper-vits-onnx/v1"},
+    "source_token_inventory_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "entry_count": {"type": "integer", "minimum": 1, "maximum": 65535},
+    "maximum_output_tokens": {"type": "integer", "minimum": 8, "maximum": 8192},
+    "target_id_max": {"const": 255}
+  }
+}

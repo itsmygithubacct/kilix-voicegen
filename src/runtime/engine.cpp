@@ -19,6 +19,8 @@
 #include "frontend/frontend.h"
 #include "runtime/frontend_package.h"
 #include "runtime/model_package.h"
+#include "runtime/piper_projection.h"
+#include "runtime/piper_runtime.h"
 #include "runtime/sha256.h"
 
 namespace {
@@ -133,6 +135,8 @@ struct kgv_engine final {
     std::uint32_t thread_count = 1U;
     kgv::VerifiedModel model;
     kgv::VerifiedFrontendPackage frontend;
+    kgv::PiperTokenProjection piper_projection;
+    std::unique_ptr<kgv::PiperRuntime> piper_runtime;
 };
 
 struct kgv_job final {
@@ -145,6 +149,7 @@ struct kgv_job final {
     std::uint64_t seed = KGV_DEFAULT_SEED;
     kgv::FrontendAnalysis analysis;
     kgv::ResolvedFrontendResult resolved;
+    std::vector<kgv::PiperProjectedChunk> piper_chunks;
     std::atomic<bool> cancelled{false};
     std::atomic<int> state{0};  // 0 created, 1 running, 2 finished
     std::mutex state_mutex;
@@ -374,7 +379,8 @@ int kgv_engine_open(const char *model_directory,
             write_error(error, error_size, verification_error);
             return status;
         }
-        if (model.deterministic_test_sha256 != fixture_smoke_sha256()) {
+        if (model.engine_kind == "fixture-tone/v1" &&
+            model.deterministic_test_sha256 != fixture_smoke_sha256()) {
             write_error(error, error_size,
                         "fixture deterministic smoke-vector digest does not match runtime");
             return KGV_INVALID_MODEL;
@@ -389,10 +395,39 @@ int kgv_engine_open(const char *model_directory,
             return frontend_status;
         }
 
+        kgv::PiperTokenProjection piper_projection;
+        std::unique_ptr<kgv::PiperRuntime> piper_runtime;
+        if (model.engine_kind == "piper-vits-onnx/v1") {
+            const kgv::VerifiedPayload *projection_payload =
+                model.payload_for_role("token_projection");
+            if (projection_payload == nullptr) {
+                write_error(error, error_size,
+                            "verified Piper package lacks its token projection");
+                return KGV_INVALID_MODEL;
+            }
+            std::string piper_error;
+            const int projection_status = kgv::load_piper_token_projection(
+                projection_payload->bytes, projection_payload->sha256,
+                frontend.model_tokens, model.target_id_max, &piper_projection,
+                &piper_error);
+            if (projection_status != KGV_OK) {
+                write_error(error, error_size, piper_error);
+                return projection_status;
+            }
+            const int runtime_status = kgv::PiperRuntime::create(
+                model, options->thread_count, &piper_runtime, &piper_error);
+            if (runtime_status != KGV_OK) {
+                write_error(error, error_size, piper_error);
+                return runtime_status;
+            }
+        }
+
         auto engine = std::make_unique<kgv_engine>();
         engine->thread_count = options->thread_count;
         engine->model = std::move(model);
         engine->frontend = std::move(frontend);
+        engine->piper_projection = std::move(piper_projection);
+        engine->piper_runtime = std::move(piper_runtime);
         *out_engine = engine.release();
         return KGV_OK;
     } catch (const std::bad_alloc &) {
@@ -434,6 +469,12 @@ int kgv_job_create(kgv_engine *engine,
     }
     if (!std::isfinite(request->rate) || request->rate < 0.70F || request->rate > 1.50F) {
         write_error(error, error_size, "speech rate must be finite and between 0.70 and 1.50");
+        return KGV_INVALID_ARGUMENT;
+    }
+    if (engine->model.engine_kind == "piper-vits-onnx/v1" &&
+        request->seed != KGV_DEFAULT_SEED) {
+        write_error(error, error_size,
+                    "Piper research packages accept only the ABI v1 default seed");
         return KGV_INVALID_ARGUMENT;
     }
 
@@ -485,6 +526,18 @@ int kgv_job_create(kgv_engine *engine,
             return status;
         }
 
+        std::vector<kgv::PiperProjectedChunk> piper_chunks;
+        if (engine->model.engine_kind == "piper-vits-onnx/v1") {
+            status = kgv::project_piper_tokens(engine->piper_projection,
+                                               resolved.model_tokens,
+                                               &piper_chunks,
+                                               &resolved_failure.message);
+            if (status != KGV_OK) {
+                write_error(error, error_size, resolved_failure.message);
+                return status;
+            }
+        }
+
         bool expected = false;
         if (!engine->claimed.compare_exchange_strong(expected, true,
                                                      std::memory_order_acq_rel)) {
@@ -505,6 +558,7 @@ int kgv_job_create(kgv_engine *engine,
         job->seed = request->seed;
         job->analysis = analysis;
         job->resolved = std::move(resolved);
+        job->piper_chunks = std::move(piper_chunks);
         *out_job = job.release();
         return KGV_OK;
     } catch (const std::bad_alloc &) {
@@ -554,6 +608,21 @@ int kgv_job_run(kgv_job *job,
     }
 
     try {
+        if (job->engine->model.engine_kind == "piper-vits-onnx/v1") {
+            if (job->engine->piper_runtime == nullptr) {
+                write_error(error, error_size,
+                            "verified Piper engine has no inference runtime");
+                return KGV_INVALID_STATE;
+            }
+            std::string piper_error;
+            const int status = job->engine->piper_runtime->synthesize(
+                job->piper_chunks, job->rate, &job->cancelled, callback, user,
+                &piper_error);
+            if (status != KGV_OK) {
+                write_error(error, error_size, piper_error);
+            }
+            return status;
+        }
         const std::uint64_t total_frames =
             fixture_total_frames(job->analysis.spoken_scalar_count, job->rate_milli);
         std::uint64_t emitted = 0U;
@@ -593,6 +662,9 @@ int kgv_job_run(kgv_job *job,
 void kgv_job_cancel(kgv_job *job) {
     if (job != nullptr) {
         job->cancelled.store(true, std::memory_order_release);
+        if (job->engine != nullptr && job->engine->piper_runtime != nullptr) {
+            job->engine->piper_runtime->cancel_active();
+        }
     }
 }
 
@@ -600,7 +672,7 @@ void kgv_job_destroy(kgv_job *job) {
     if (job == nullptr) {
         return;
     }
-    job->cancelled.store(true, std::memory_order_release);
+    kgv_job_cancel(job);
     {
         std::unique_lock<std::mutex> lock(job->state_mutex);
         job->state_changed.wait(lock, [job] {

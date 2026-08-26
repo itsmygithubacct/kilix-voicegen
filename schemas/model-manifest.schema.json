@@ -14,10 +14,26 @@
     "model_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,126}[a-z0-9]$"},
     "version": {"type": "string", "minLength": 1, "maxLength": 64},
     "engine": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["kind"],
-      "properties": {"kind": {"type": "string", "minLength": 1, "maxLength": 64}}
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": {"kind": {"const": "fixture-tone/v1"}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "model_sample_rate", "noise_scale_milli", "noise_w_milli", "target_id_max"],
+          "properties": {
+            "kind": {"const": "piper-vits-onnx/v1"},
+            "model_sample_rate": {"const": 22050},
+            "noise_scale_milli": {"type": "integer", "minimum": 0, "maximum": 2000},
+            "noise_w_milli": {"type": "integer", "minimum": 0, "maximum": 2000},
+            "target_id_max": {"const": 255}
+          }
+        }
+      ]
     },
     "revisions": {
       "type": "object",

@@ -405,6 +405,19 @@ std::size_t ModelTokenInventory::maximum_input_tokens() const noexcept {
     return maximum_input_tokens_;
 }
 
+std::vector<std::uint16_t> ModelTokenInventory::token_ids() const {
+    std::vector<std::uint16_t> result;
+    result.reserve(entry_count());
+    for (const auto &entry : controls_) {
+        result.push_back(entry.second);
+    }
+    for (const auto &entry : segment_tokens_) {
+        result.push_back(entry.second);
+    }
+    std::sort(result.begin(), result.end());
+    return result;
+}
+
 int load_model_token_inventory(
     std::string_view jsonl,
     std::string_view expected_resource_sha256,

@@ -20,11 +20,17 @@ ROOT_KEYS = {
     "frontend", "voices", "quantization", "required_cpu_features", "files", "tensors",
     "licenses", "determinism", "resources", "limitations",
 }
-EXPECTED_TENSORS = {
+FIXTURE_TENSORS = {
     ("token_ids", "input", "int64", (1, "N")),
     ("speaker_id", "input", "int64", (1,)),
     ("length_scale", "input", "float32", (1,)),
     ("audio", "output", "int16", ("T",)),
+}
+PIPER_TENSORS = {
+    ("input", "input", "int64", (1, "N")),
+    ("input_lengths", "input", "int64", (1,)),
+    ("scales", "input", "float32", (3,)),
+    ("output", "output", "float32", (1, 1, 1, "T")),
 }
 
 
@@ -146,8 +152,22 @@ def verify_model(directory: pathlib.Path, expected_release_sha256: str) -> dict[
         raise VerificationError("MANIFEST.json does not match RELEASE.json")
     if set(manifest) != ROOT_KEYS or manifest["schema"] != "kilix.voicegen.model/v1":
         raise VerificationError("model manifest schema or fields are unsupported")
-    if manifest["engine"] != {"kind": "fixture-tone/v1"}:
-        raise VerificationError("model engine kind is unsupported")
+    engine = manifest["engine"]
+    if engine == {"kind": "fixture-tone/v1"}:
+        engine_kind = "fixture-tone/v1"
+    elif (isinstance(engine, dict)
+          and set(engine) == {"kind", "model_sample_rate", "noise_scale_milli",
+                              "noise_w_milli", "target_id_max"}
+          and engine.get("kind") == "piper-vits-onnx/v1"
+          and engine.get("model_sample_rate") == 22050
+          and isinstance(engine.get("noise_scale_milli"), int)
+          and 0 <= engine["noise_scale_milli"] <= 2000
+          and isinstance(engine.get("noise_w_milli"), int)
+          and 0 <= engine["noise_w_milli"] <= 2000
+          and engine.get("target_id_max") == 255):
+        engine_kind = "piper-vits-onnx/v1"
+    else:
+        raise VerificationError("model engine kind or parameters are unsupported")
     runtime_abi = manifest["runtime_abi"]
     if (not isinstance(runtime_abi, dict) or set(runtime_abi) != {"minimum", "maximum"}
             or not isinstance(runtime_abi["minimum"], int)
@@ -202,8 +222,10 @@ def verify_model(directory: pathlib.Path, expected_release_sha256: str) -> dict[
         }
     except (KeyError, TypeError) as error:
         raise VerificationError("tensor metadata is invalid") from error
-    if len(tensors) != len(actual_tensors) or actual_tensors != EXPECTED_TENSORS:
-        raise VerificationError("fixture tensor contract is unknown or incomplete")
+    expected_tensors = (FIXTURE_TENSORS if engine_kind == "fixture-tone/v1"
+                        else PIPER_TENSORS)
+    if len(tensors) != len(actual_tensors) or actual_tensors != expected_tensors:
+        raise VerificationError("engine tensor contract is unknown or incomplete")
 
     files = manifest["files"]
     if not isinstance(files, list) or not 1 <= len(files) <= 256:
@@ -228,16 +250,34 @@ def verify_model(directory: pathlib.Path, expected_release_sha256: str) -> dict[
             raise VerificationError("payload does not match its byte count or SHA-256")
         total_bytes += len(payload)
         roles[role] = (relative, payload)
-    required_roles = {
-        "fixture_graph", "segment_inventory", "pronunciation_lexicon",
-        "lts_model", "model_token_inventory",
-    }
-    optional_roles = {"heteronym_rules", "morphology_rules", "weak_form_rules"}
+    if engine_kind == "fixture-tone/v1":
+        required_roles = {
+            "fixture_graph", "segment_inventory", "pronunciation_lexicon",
+            "lts_model", "model_token_inventory",
+        }
+        optional_roles = {"heteronym_rules", "morphology_rules", "weak_form_rules"}
+    else:
+        required_roles = {
+            "onnx_model", "segment_inventory", "pronunciation_lexicon",
+            "lts_model", "model_token_inventory", "token_projection",
+        }
+        optional_roles = {
+            "heteronym_rules", "morphology_rules", "weak_form_rules",
+            "license_notice",
+        }
     if not required_roles <= roles.keys() or roles.keys() - required_roles - optional_roles:
-        raise VerificationError("fixture payload roles are absent or unsupported")
-    graph_path, graph = roles["fixture_graph"]
-    if graph_path != "fixture.graph" or not graph:
-        raise VerificationError("deterministic fixture graph is absent")
+        raise VerificationError("engine payload roles are absent or unsupported")
+    if engine_kind == "fixture-tone/v1":
+        graph_path, graph = roles["fixture_graph"]
+        if graph_path != "fixture.graph" or not graph:
+            raise VerificationError("deterministic fixture graph is absent")
+    else:
+        graph_path, graph = roles["onnx_model"]
+        projection_path, projection = roles["token_projection"]
+        if graph_path != "model.onnx" or len(graph) < 1024:
+            raise VerificationError("Piper ONNX graph is absent or implausibly small")
+        if projection_path != "frontend/piper_projection.jsonl" or not projection:
+            raise VerificationError("Piper token projection is absent")
     _segment_path, segment_payload = roles["segment_inventory"]
     segment_ids = _parse_segments(segment_payload)
     if (segment_ids != frontend["segment_ids"]
@@ -250,6 +290,13 @@ def verify_model(directory: pathlib.Path, expected_release_sha256: str) -> dict[
     determinism = manifest["determinism"]
     if not isinstance(determinism, dict):
         raise VerificationError("determinism metadata is invalid")
+    expected_determinism = ("platform-independent-integer"
+                            if engine_kind == "fixture-tone/v1"
+                            else "platform-class")
+    if (set(determinism) != {"class", "default_seed", "test_vector_sha256"}
+            or determinism.get("class") != expected_determinism
+            or determinism.get("default_seed") != "5433993625645500209"):
+        raise VerificationError("determinism metadata is incompatible with the engine")
     _require_sha(determinism.get("test_vector_sha256"))
     return {
         "schema": "kilix.voicegen.verification/v1",

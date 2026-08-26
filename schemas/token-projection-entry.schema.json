@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:kilix:voicegen:schema:token-projection-entry:v1",
+  "title": "Kilix Voicegen Piper token-projection JSONL entry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "source_id", "target_ids"],
+  "properties": {
+    "schema": {"const": "kilix.voicegen.token-projection-entry/v1"},
+    "source_id": {"type": "integer", "minimum": 0, "maximum": 65535},
+    "target_ids": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {"type": "integer", "minimum": 0, "maximum": 255}
+    }
+  }
+}

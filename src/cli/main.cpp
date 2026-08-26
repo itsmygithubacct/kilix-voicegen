@@ -378,7 +378,7 @@ int synthesize_command(Arguments arguments) {
         }
         return 1;
     }
-    std::cout << "wrote deterministic fixture PCM; this output is not speech\n";
+    std::cout << "wrote 24 kHz mono PCM WAV\n";
     return 0;
 }
 

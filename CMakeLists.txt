@@ -7,6 +7,8 @@ include(CTest)
 
 option(KGV_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 option(KGV_WARNINGS_AS_ERRORS "Treat project compiler warnings as errors" ON)
+option(KGV_ENABLE_ONNXRUNTIME
+  "Enable the pinned CPU-only ONNX Runtime backend for Piper research packages" OFF)
 
 set(KGV_UTF8PROC_SOURCE_DIR "" CACHE PATH
   "Clean source checkout of the pinned utf8proc revision")
@@ -109,7 +111,9 @@ target_link_libraries(kilix_voicegen_frontend PUBLIC
 add_library(kilix_voicegen SHARED
   src/runtime/engine.cpp
   src/runtime/frontend_package.cpp
-  src/runtime/model_package.cpp)
+  src/runtime/model_package.cpp
+  src/runtime/piper_projection.cpp
+  src/runtime/piper_runtime.cpp)
 add_library(Kilix::Voicegen ALIAS kilix_voicegen)
 
 target_compile_definitions(kilix_voicegen PRIVATE KGV_BUILDING_LIBRARY=1)
@@ -124,6 +128,79 @@ set_target_properties(kilix_voicegen PROPERTIES
   VISIBILITY_INLINES_HIDDEN YES
   VERSION ${PROJECT_VERSION}
   SOVERSION 1)
+if(KGV_ENABLE_ONNXRUNTIME)
+  if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(FATAL_ERROR "The pinned ONNX Runtime closure is currently verified only on Linux")
+  endif()
+  set(KGV_ONNXRUNTIME_SOURCE_DIR "" CACHE PATH
+    "Clean source checkout of the pinned ONNX Runtime revision")
+  set(KGV_ONNXRUNTIME_LIBRARY "" CACHE FILEPATH
+    "Pinned CPU-only libonnxruntime.so.1.29.0")
+  if(KGV_ONNXRUNTIME_SOURCE_DIR STREQUAL "" AND
+     DEFINED ENV{KGV_ONNXRUNTIME_SOURCE_DIR})
+    set(KGV_ONNXRUNTIME_SOURCE_DIR "$ENV{KGV_ONNXRUNTIME_SOURCE_DIR}")
+  endif()
+  if(KGV_ONNXRUNTIME_LIBRARY STREQUAL "" AND
+     DEFINED ENV{KGV_ONNXRUNTIME_LIBRARY})
+    set(KGV_ONNXRUNTIME_LIBRARY "$ENV{KGV_ONNXRUNTIME_LIBRARY}")
+  endif()
+  if(NOT EXISTS
+     "${KGV_ONNXRUNTIME_SOURCE_DIR}/include/onnxruntime/core/session/onnxruntime_c_api.h")
+    message(FATAL_ERROR
+      "Set KGV_ONNXRUNTIME_SOURCE_DIR to the clean pinned ONNX Runtime checkout")
+  endif()
+  execute_process(
+    COMMAND git -C "${KGV_ONNXRUNTIME_SOURCE_DIR}" rev-parse HEAD
+    RESULT_VARIABLE KGV_ONNXRUNTIME_REVISION_RESULT
+    OUTPUT_VARIABLE KGV_ONNXRUNTIME_REVISION
+    ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
+  execute_process(
+    COMMAND git -C "${KGV_ONNXRUNTIME_SOURCE_DIR}" status --porcelain=v1
+    RESULT_VARIABLE KGV_ONNXRUNTIME_STATUS_RESULT
+    OUTPUT_VARIABLE KGV_ONNXRUNTIME_STATUS
+    ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
+  if(NOT KGV_ONNXRUNTIME_REVISION_RESULT EQUAL 0 OR
+     NOT KGV_ONNXRUNTIME_STATUS_RESULT EQUAL 0 OR
+     NOT KGV_ONNXRUNTIME_REVISION STREQUAL
+       "2e2543fbe9fae542f921d47a72d21d5a4ef0b710" OR
+     NOT KGV_ONNXRUNTIME_STATUS STREQUAL "")
+    message(FATAL_ERROR "ONNX Runtime source must be clean at the locked revision")
+  endif()
+  if(NOT EXISTS "${KGV_ONNXRUNTIME_LIBRARY}")
+    message(FATAL_ERROR "Set KGV_ONNXRUNTIME_LIBRARY to the pinned CPU shared library")
+  endif()
+  get_filename_component(KGV_ONNXRUNTIME_LIBRARY_BASENAME
+    "${KGV_ONNXRUNTIME_LIBRARY}" NAME)
+  if(NOT KGV_ONNXRUNTIME_LIBRARY_BASENAME STREQUAL
+     "libonnxruntime.so.1.29.0")
+    message(FATAL_ERROR "ONNX Runtime library must retain its pinned full filename")
+  endif()
+  file(SHA256 "${KGV_ONNXRUNTIME_LIBRARY}" KGV_ONNXRUNTIME_LIBRARY_SHA256)
+  if(NOT KGV_ONNXRUNTIME_LIBRARY_SHA256 STREQUAL
+     "8902e52a04bf6bf26f1613746811d6194f9c97ce7a6a7a28452b48522d3bd8d0")
+    message(FATAL_ERROR "ONNX Runtime library does not match the locked SHA-256")
+  endif()
+  target_compile_definitions(kilix_voicegen PRIVATE
+    KGV_ENABLE_ONNXRUNTIME=1
+    KGV_ONNXRUNTIME_LIBRARY_NAME="${KGV_ONNXRUNTIME_LIBRARY_BASENAME}"
+    KGV_ONNXRUNTIME_VERSION="1.29.0")
+  target_include_directories(kilix_voicegen PRIVATE
+    "${KGV_ONNXRUNTIME_SOURCE_DIR}/include")
+  target_link_libraries(kilix_voicegen PRIVATE ${CMAKE_DL_LIBS})
+  set_target_properties(kilix_voicegen PROPERTIES
+    BUILD_RPATH "$ORIGIN"
+    INSTALL_RPATH "$ORIGIN")
+  add_custom_command(TARGET kilix_voicegen POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+      "${KGV_ONNXRUNTIME_LIBRARY}" "$<TARGET_FILE_DIR:kilix_voicegen>"
+    VERBATIM)
+  install(FILES "${KGV_ONNXRUNTIME_LIBRARY}"
+    DESTINATION ${CMAKE_INSTALL_LIBDIR})
+  install(FILES
+    "${KGV_ONNXRUNTIME_SOURCE_DIR}/LICENSE"
+    "${KGV_ONNXRUNTIME_SOURCE_DIR}/ThirdPartyNotices.txt"
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/kilix-voicegen/licenses)
+endif()
 if(UNIX AND NOT APPLE)
   target_link_options(kilix_voicegen PRIVATE
     "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/cmake/kilix_voicegen.map")
@@ -163,6 +240,11 @@ install(EXPORT KilixVoicegenTargets
 
 if(BUILD_TESTING)
   find_package(Python3 3.11 REQUIRED COMPONENTS Interpreter)
+
+  set(KGV_PIPER_PILOT_MODEL_DIR "" CACHE PATH
+    "Optional external research Piper package for interoperability tests")
+  set(KGV_PIPER_PILOT_RELEASE_SHA "" CACHE STRING
+    "Caller-pinned RELEASE.json SHA-256 for the optional Piper package")
 
   set(KGV_SANITIZER_TEST_ENV)
   if(KGV_ENABLE_SANITIZERS AND NOT MSVC)
@@ -257,6 +339,27 @@ if(BUILD_TESTING)
     "KGV_FIXTURE_SHA256=${KGV_FIXTURE_RELEASE_SHA}"
     "PYTHONDONTWRITEBYTECODE=1")
   set_tests_properties(cli PROPERTIES ENVIRONMENT "${KGV_CLI_TEST_ENV}")
+
+  string(LENGTH "${KGV_PIPER_PILOT_RELEASE_SHA}"
+    KGV_PIPER_PILOT_RELEASE_SHA_LENGTH)
+  if(KGV_ENABLE_ONNXRUNTIME AND
+     EXISTS "${KGV_PIPER_PILOT_MODEL_DIR}/RELEASE.json" AND
+     KGV_PIPER_PILOT_RELEASE_SHA_LENGTH EQUAL 64 AND
+     KGV_PIPER_PILOT_RELEASE_SHA MATCHES "^[0-9a-f]+$")
+    add_test(NAME piper_pilot_interop
+      COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_piper_pilot.py")
+    set(KGV_PIPER_PILOT_TEST_ENV
+      "KGV_LIBRARY=$<TARGET_FILE:kilix_voicegen>"
+      "KGV_PIPER_PILOT_MODEL_DIR=${KGV_PIPER_PILOT_MODEL_DIR}"
+      "KGV_PIPER_PILOT_RELEASE_SHA=${KGV_PIPER_PILOT_RELEASE_SHA}"
+      "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/bindings/python"
+      "PYTHONDONTWRITEBYTECODE=1")
+    list(APPEND KGV_PIPER_PILOT_TEST_ENV ${KGV_SANITIZER_TEST_ENV})
+    set_tests_properties(piper_pilot_interop PROPERTIES
+      ENVIRONMENT "${KGV_PIPER_PILOT_TEST_ENV}"
+      TIMEOUT 90)
+  endif()
 
   add_test(NAME repository_boundaries
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_repository.py")

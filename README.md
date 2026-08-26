@@ -10,11 +10,12 @@ at or above the selected Piper quality and CPU-operability floor.
 Phase 2 milestone P0 (foundation and frozen contracts) is complete. The
 repository provides the frozen C ABI draft, strict model-package verification,
 strict UTF-8/control validation, a typed lexical frontend trace, a native CLI,
-and a deterministic fixture engine. P1 implementation is active: the pinned
-utf8proc/Unicode 17 dependency now supplies NFC with original-byte spans, and the
-staged lexical/normalization vectors execute. Reviewed product pronunciation
-data, a product model-token inventory, production recordings, and native neural
-inference remain open. A strict pronunciation-resource ABI and native loader now
+a deterministic fixture engine, and an optional native Piper/VITS ONNX research
+backend. P1 implementation is active: the pinned utf8proc/Unicode 17 dependency
+supplies NFC with original-byte spans, and the staged lexical/normalization
+vectors execute. Reviewed product pronunciation data, production recordings,
+and release models remain open. A strict pronunciation-resource ABI and native
+loader now
 bind canonical `en-AU` JSONL
 to caller-pinned file and segment-inventory hashes, enforce bounded NFC entries
 and role-qualified syllables, and require a separate review-record hash before a
@@ -30,20 +31,31 @@ can run. The fixture emits a quiet triangle-wave test signal so streaming,
 backpressure, cancellation, corruption handling, and language bindings can be
 tested before the neural backend is installed.
 
+The optional `piper-vits-onnx/v1` path loads an exact hash-pinned ONNX Runtime
+1.29.0 shared library, creates a session from the already verified in-memory
+graph bytes, checks the graph's real tensor names/types/shapes, projects the
+resolved Kilix token ABI into the Piper ID space, and resamples 22.05 kHz graph
+output to the fixed 24 kHz ABI. It preserves synchronous 480-frame callbacks
+and uses ONNX Runtime termination for cancellation during inference. The public
+C ABI is unchanged.
+
 The v1 frontend and model contract is fixed to `en-AU`; it has no automatic
 dialect chooser. British English, then General American English, are
 whole-release recruitment/licensing fallbacks that require a new contract.
 
-**This source snapshot does not yet produce speech.** It contains no trained
-model, recorded voice, downloaded checkpoint, or generated audio. A research-only
-Australian-female technical pilot exists outside this clean source tree.
+**This engine can now produce speech when built with the optional ONNX backend
+and opened with a compatible external package.** The clean source tree still
+contains no model, recording, checkpoint, or generated audio. The current
+Australian-female package is an internal technical pilot, not the
+release-approved `kilix-female-01`: its recording and warm-start lineage do not
+satisfy the production consent/provenance gate.
 
 ## Build and test
 
 An out-of-tree CMake build needs a C++17 compiler, Python 3.11 or newer, and a
 clean checkout of utf8proc at the exact revision in
-`cmake/dependencies.lock.json`. Point CMake at that source checkout; it is built
-statically and the installed runtime has no network or external-library lookup.
+`cmake/dependencies.lock.json`. Point CMake at that source checkout; utf8proc is
+built statically. The default build has no neural-runtime dependency.
 
 ```sh
 export KGV_UTF8PROC_SOURCE_DIR=/path/to/utf8proc
@@ -51,6 +63,28 @@ cmake --preset dev
 cmake --build --preset dev
 ctest --preset dev
 ```
+
+To enable the Linux research backend, also provide the clean pinned ONNX Runtime
+source checkout (for the exact C API headers and notices) and the exact external
+CPU shared library recorded in the dependency lock:
+
+```sh
+cmake -S . -B /path/to/build \
+  -DKGV_UTF8PROC_SOURCE_DIR=/path/to/utf8proc \
+  -DKGV_ENABLE_ONNXRUNTIME=ON \
+  -DKGV_ONNXRUNTIME_SOURCE_DIR=/path/to/onnxruntime \
+  -DKGV_ONNXRUNTIME_LIBRARY=/path/to/libonnxruntime.so.1.29.0
+cmake --build /path/to/build
+ctest --test-dir /path/to/build --output-on-failure
+```
+
+CMake verifies the source revisions, clean worktrees, exact library filename,
+and library SHA-256. The build and install place the library beside
+`libkilix_voicegen`, and the runtime asks for that exact sibling filename. It
+does not download a runtime or model. Supplying
+`KGV_PIPER_PILOT_MODEL_DIR` and `KGV_PIPER_PILOT_RELEASE_SHA` at configure time
+adds the external end-to-end speech, repeatability, voice/seed, and cancellation
+test without copying the package into the source tree.
 
 Inspect the current lexical slice without a model:
 
@@ -88,8 +122,9 @@ kgv_build=../.build/kilix-voicegen-dev
 ```
 
 `kilix-voicegen synthesize` exercises the same ABI and writes 24 kHz mono s16
-WAV output. With the current fixture package, that output is a test tone, never
-speech. Generated audio and model packages must stay outside this repository.
+WAV output. A fixture package produces a test tone; a verified
+`piper-vits-onnx/v1` package produces speech in an ONNX-enabled build. Generated
+audio and all model packages must stay outside this repository.
 
 ## Runtime contract
 

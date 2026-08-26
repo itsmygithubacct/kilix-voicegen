@@ -310,6 +310,45 @@ void verify_audio(const json::Value &value, VerifiedModel *model) {
     model->sample_rate = static_cast<std::uint32_t>(sample_rate);
 }
 
+void verify_engine(const json::Value &value, VerifiedModel *model) {
+    const auto &engine = object_value(value);
+    const std::string &kind = string_value(required(engine, "kind"), 64U);
+    if (kind == "fixture-tone/v1") {
+        if (!exact_keys(engine, {"kind"})) {
+            invalid("fixture engine fields do not match schema v1");
+        }
+        model->engine_kind = kind;
+        model->model_sample_rate = KGV_SAMPLE_RATE;
+        return;
+    }
+    if (kind == "piper-vits-onnx/v1") {
+        if (!exact_keys(engine, {"kind", "model_sample_rate",
+                                 "noise_scale_milli", "noise_w_milli",
+                                 "target_id_max"})) {
+            invalid("Piper engine fields do not match schema v1");
+        }
+        const std::uint64_t model_rate =
+            unsigned_value(required(engine, "model_sample_rate"));
+        const std::uint64_t noise_scale =
+            unsigned_value(required(engine, "noise_scale_milli"));
+        const std::uint64_t noise_w =
+            unsigned_value(required(engine, "noise_w_milli"));
+        const std::uint64_t target_id_max =
+            unsigned_value(required(engine, "target_id_max"));
+        if (model_rate != 22050U || noise_scale > 2000U ||
+            noise_w > 2000U || target_id_max != 255U) {
+            invalid("Piper engine parameters are outside the implemented v1 contract");
+        }
+        model->engine_kind = kind;
+        model->model_sample_rate = static_cast<std::uint32_t>(model_rate);
+        model->noise_scale_milli = static_cast<std::uint32_t>(noise_scale);
+        model->noise_w_milli = static_cast<std::uint32_t>(noise_w);
+        model->target_id_max = static_cast<std::uint16_t>(target_id_max);
+        return;
+    }
+    invalid("model engine kind is not implemented by this runtime");
+}
+
 void verify_frontend(const json::Value &value, VerifiedModel *model) {
     const auto &object = object_value(value);
     if (!exact_keys(object, {"schema", "dialect", "unicode_version", "token_schema",
@@ -384,6 +423,9 @@ void verify_quantization(const json::Value &value, std::string_view engine_kind)
     (void)string_value(required(object, "policy"), 256U);
     if (engine_kind == "fixture-tone/v1" && precision != "fixture") {
         invalid("fixture engine requires fixture precision metadata");
+    }
+    if (engine_kind == "piper-vits-onnx/v1" && precision != "fp32") {
+        invalid("Piper v1 engine requires fp32 precision metadata");
     }
 }
 
@@ -482,6 +524,38 @@ void verify_files(const json::Value &value,
             graph->bytes.empty()) {
             invalid("fixture model is missing its deterministic fixture graph");
         }
+    } else if (engine_kind == "piper-vits-onnx/v1") {
+        const std::set<std::string> required_roles = {
+            "onnx_model", "segment_inventory", "pronunciation_lexicon",
+            "lts_model", "model_token_inventory", "token_projection",
+        };
+        const std::set<std::string> optional_roles = {
+            "heteronym_rules", "morphology_rules", "weak_form_rules",
+            "license_notice",
+        };
+        for (const std::string &role : required_roles) {
+            if (roles.find(role) == roles.end()) {
+                invalid("Piper model is missing a required payload role");
+            }
+        }
+        for (const std::string &role : roles) {
+            if (required_roles.find(role) == required_roles.end() &&
+                optional_roles.find(role) == optional_roles.end()) {
+                invalid("Piper model declares an unsupported payload role");
+            }
+        }
+        const VerifiedPayload *onnx = nullptr;
+        const VerifiedPayload *projection = nullptr;
+        for (const VerifiedPayload &payload : payloads) {
+            if (payload.role == "onnx_model") onnx = &payload;
+            if (payload.role == "token_projection") projection = &payload;
+        }
+        if (onnx == nullptr || onnx->path != "model.onnx" ||
+            onnx->bytes.size() < 1024U || projection == nullptr ||
+            projection->path != "frontend/piper_projection.jsonl" ||
+            projection->bytes.empty()) {
+            invalid("Piper model graph or token projection path is invalid");
+        }
     }
     if (total_bytes != expected_model_bytes) {
         invalid("declared model byte total does not match payload files");
@@ -544,6 +618,16 @@ void verify_tensors(const json::Value &value, std::string_view engine_kind) {
         if (signatures != expected) {
             invalid("fixture graph tensor contract is unknown or incomplete");
         }
+    } else if (engine_kind == "piper-vits-onnx/v1") {
+        const std::set<std::string> expected = {
+            "input|input|int64|1,N",
+            "input_lengths|input|int64|1",
+            "output|output|float32|1,1,1,T",
+            "scales|input|float32|3",
+        };
+        if (signatures != expected) {
+            invalid("Piper graph tensor contract is unknown or incomplete");
+        }
     }
 }
 
@@ -574,14 +658,22 @@ void verify_licenses(const json::Value &value,
     }
 }
 
-void verify_determinism(const json::Value &value, VerifiedModel *model) {
+void verify_determinism(const json::Value &value,
+                        std::string_view engine_kind,
+                        VerifiedModel *model) {
     const auto &object = object_value(value);
     if (!exact_keys(object, {"class", "default_seed", "test_vector_sha256"})) {
         invalid("determinism fields do not match schema v1");
     }
-    if (string_value(required(object, "class"), 64U) != "platform-independent-integer" ||
-        string_value(required(object, "default_seed"), 20U) != "5433993625645500209") {
-        invalid("fixture determinism contract is invalid");
+    const std::string &kind = string_value(required(object, "class"), 64U);
+    const std::string &seed = string_value(required(object, "default_seed"), 20U);
+    if (seed != "5433993625645500209") {
+        invalid("model determinism default seed is invalid");
+    }
+    if ((engine_kind == "fixture-tone/v1" &&
+         kind != "platform-independent-integer") ||
+        (engine_kind == "piper-vits-onnx/v1" && kind != "platform-class")) {
+        invalid("model determinism class is invalid for its engine");
     }
     model->deterministic_test_sha256 =
         string_value(required(object, "test_vector_sha256"));
@@ -624,14 +716,7 @@ void verify_manifest(const json::Value &manifest,
     model->model_id = string_value(required(object, "model_id"), 128U);
     model->version = string_value(required(object, "version"), 64U);
 
-    const auto &engine = object_value(required(object, "engine"));
-    if (!exact_keys(engine, {"kind"})) {
-        invalid("model engine fields do not match schema v1");
-    }
-    model->engine_kind = string_value(required(engine, "kind"), 64U);
-    if (model->engine_kind != "fixture-tone/v1") {
-        invalid("model engine kind is not implemented by this runtime");
-    }
+    verify_engine(required(object, "engine"), model);
 
     verify_revisions(required(object, "revisions"));
     verify_runtime_abi(required(object, "runtime_abi"));
@@ -646,7 +731,7 @@ void verify_manifest(const json::Value &manifest,
                  model->engine_kind, model, &verified_paths);
     verify_tensors(required(object, "tensors"), model->engine_kind);
     verify_licenses(required(object, "licenses"), verified_paths);
-    verify_determinism(required(object, "determinism"), model);
+    verify_determinism(required(object, "determinism"), model->engine_kind, model);
     verify_limitations(required(object, "limitations"));
 }
 

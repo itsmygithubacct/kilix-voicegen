@@ -52,7 +52,7 @@ class CliTests(unittest.TestCase):
             )
             result = self.run_cli(*command, input_bytes=b"Kilix fixture")
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn(b"not speech", result.stdout)
+            self.assertIn(b"24 kHz mono PCM WAV", result.stdout)
             data = output.read_bytes()
             self.assertGreater(len(data), 44)
             self.assertEqual(data[:4], b"RIFF")

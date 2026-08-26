@@ -20,6 +20,14 @@
       "source": "https://github.com/microsoft/onnxruntime.git",
       "license": "MIT plus bundled third-party notices",
       "execution_providers": ["CPUExecutionProvider"],
+      "runtime_binary": {
+        "filename": "libonnxruntime.so.1.29.0",
+        "sha256": "8902e52a04bf6bf26f1613746811d6194f9c97ce7a6a7a28452b48522d3bd8d0",
+        "bytes": 28501848,
+        "origin": "onnxruntime 1.29.0 CPython 3.12 manylinux_2_28_x86_64 wheel installation",
+        "wheel_archive_retained": false,
+        "disposition": "hash-pinned research binary; rebuild release closure from pinned source"
+      },
       "enabled_in_foundation_fixture": false
     }
   ]

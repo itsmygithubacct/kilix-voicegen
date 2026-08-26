@@ -34,6 +34,7 @@ public:
     PronunciationAdmission admission() const noexcept;
     std::size_t entry_count() const noexcept;
     std::size_t maximum_input_tokens() const noexcept;
+    std::vector<std::uint16_t> token_ids() const;
 
 private:
     friend int load_model_token_inventory(
