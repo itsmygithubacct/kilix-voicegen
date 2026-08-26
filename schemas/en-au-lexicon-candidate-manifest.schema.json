@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:kilix:voicegen:schema:en-au-lexicon-candidate-manifest:v1",
+  "title": "Manifest for an unreviewed CMUdict-to-General-Australian candidate",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "status", "source", "generator", "policy_id", "policy_sha256", "candidate_entries", "review_queue_entries", "review_flag_counts", "files"],
+  "properties": {
+    "schema": {"const": "kilix.voicegen.en-au-lexicon-candidate-manifest/v1"},
+    "status": {"const": "machine-transformed-unreviewed-not-product-admitted"},
+    "candidate_entries": {"type": "integer", "minimum": 1},
+    "review_queue_entries": {"type": "integer", "minimum": 0},
+    "policy_id": {"const": "kilix-en-au-cmudict-transform-1"},
+    "policy_sha256": {"$ref": "#/$defs/sha256"},
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "revision", "dictionary_bytes", "dictionary_sha256", "license_bytes", "license_sha256"],
+      "properties": {
+        "repository": {"const": "https://github.com/cmusphinx/cmudict.git"},
+        "revision": {"$ref": "#/$defs/revision"},
+        "dictionary_bytes": {"type": "integer", "minimum": 1},
+        "dictionary_sha256": {"$ref": "#/$defs/sha256"},
+        "license_bytes": {"type": "integer", "minimum": 1},
+        "license_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "generator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "revision", "sha256"],
+      "properties": {
+        "repository": {"const": "https://github.com/itsmygithubacct/kilix-voicegen.git"},
+        "revision": {"$ref": "#/$defs/revision"},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "review_flag_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "AA_LOT_PALM_SPLIT_REVIEW": {"type": "integer", "minimum": 0},
+        "AE_TRAP_BATH_SPLIT_REVIEW": {"type": "integer", "minimum": 0},
+        "NO_PRONOUNCED_VOWEL_REVIEW": {"type": "integer", "minimum": 0},
+        "POSTVOCALIC_R_DROPPED": {"type": "integer", "minimum": 0},
+        "RHOTIC_VOWEL_TRANSFORMED": {"type": "integer", "minimum": 0}
+      }
+    },
+    "files": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["CMUDICT_LICENSE", "POLICY.json", "candidate.jsonl", "review-queue.jsonl"],
+      "properties": {
+        "CMUDICT_LICENSE": {"$ref": "#/$defs/file"},
+        "POLICY.json": {"$ref": "#/$defs/file"},
+        "candidate.jsonl": {"$ref": "#/$defs/file"},
+        "review-queue.jsonl": {"$ref": "#/$defs/file"}
+      }
+    }
+  },
+  "$defs": {
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bytes", "sha256"],
+      "properties": {
+        "bytes": {"type": "integer", "minimum": 1},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

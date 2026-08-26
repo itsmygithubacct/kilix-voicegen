@@ -8,6 +8,36 @@ include(CTest)
 option(KGV_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 option(KGV_WARNINGS_AS_ERRORS "Treat project compiler warnings as errors" ON)
 
+set(KGV_UTF8PROC_SOURCE_DIR "" CACHE PATH
+  "Clean source checkout of the pinned utf8proc revision")
+if(KGV_UTF8PROC_SOURCE_DIR STREQUAL "" AND DEFINED ENV{KGV_UTF8PROC_SOURCE_DIR})
+  set(KGV_UTF8PROC_SOURCE_DIR "$ENV{KGV_UTF8PROC_SOURCE_DIR}")
+endif()
+if(NOT EXISTS "${KGV_UTF8PROC_SOURCE_DIR}/CMakeLists.txt")
+  message(FATAL_ERROR
+    "Set KGV_UTF8PROC_SOURCE_DIR to the clean pinned utf8proc source checkout")
+endif()
+execute_process(
+  COMMAND git -C "${KGV_UTF8PROC_SOURCE_DIR}" rev-parse HEAD
+  RESULT_VARIABLE KGV_UTF8PROC_REVISION_RESULT
+  OUTPUT_VARIABLE KGV_UTF8PROC_REVISION
+  ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
+execute_process(
+  COMMAND git -C "${KGV_UTF8PROC_SOURCE_DIR}" status --porcelain=v1
+  RESULT_VARIABLE KGV_UTF8PROC_STATUS_RESULT
+  OUTPUT_VARIABLE KGV_UTF8PROC_STATUS
+  ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
+if(NOT KGV_UTF8PROC_REVISION_RESULT EQUAL 0 OR
+   NOT KGV_UTF8PROC_STATUS_RESULT EQUAL 0 OR
+   NOT KGV_UTF8PROC_REVISION STREQUAL "0075ed7d0adba45682ee6bf7a83b10f8fd110163" OR
+   NOT KGV_UTF8PROC_STATUS STREQUAL "")
+  message(FATAL_ERROR "utf8proc source must be clean at the locked revision")
+endif()
+set(UTF8PROC_INSTALL OFF CACHE BOOL "Do not install the private utf8proc build target" FORCE)
+set(UTF8PROC_ENABLE_TESTING OFF CACHE BOOL "Do not build upstream tests" FORCE)
+add_subdirectory("${KGV_UTF8PROC_SOURCE_DIR}"
+  "${CMAKE_CURRENT_BINARY_DIR}/_deps/utf8proc" EXCLUDE_FROM_ALL)
+
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
@@ -42,8 +72,20 @@ function(kgv_sanitizers target)
   endif()
 endfunction()
 
-add_library(kilix_voicegen SHARED
+add_library(kilix_voicegen_frontend STATIC
   src/frontend/frontend.cpp
+  src/frontend/pipeline.cpp)
+target_include_directories(kilix_voicegen_frontend PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/src)
+set_target_properties(kilix_voicegen_frontend PROPERTIES
+  CXX_VISIBILITY_PRESET hidden
+  VISIBILITY_INLINES_HIDDEN YES)
+kgv_project_warnings(kilix_voicegen_frontend)
+kgv_sanitizers(kilix_voicegen_frontend)
+target_link_libraries(kilix_voicegen_frontend PUBLIC utf8proc::utf8proc)
+
+add_library(kilix_voicegen SHARED
   src/runtime/engine.cpp
   src/runtime/json.cpp
   src/runtime/model_package.cpp
@@ -51,6 +93,7 @@ add_library(kilix_voicegen SHARED
 add_library(Kilix::Voicegen ALIAS kilix_voicegen)
 
 target_compile_definitions(kilix_voicegen PRIVATE KGV_BUILDING_LIBRARY=1)
+target_link_libraries(kilix_voicegen PRIVATE kilix_voicegen_frontend)
 target_include_directories(kilix_voicegen
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -69,7 +112,8 @@ kgv_project_warnings(kilix_voicegen)
 kgv_sanitizers(kilix_voicegen)
 
 add_executable(kilix-voicegen src/cli/main.cpp)
-target_link_libraries(kilix-voicegen PRIVATE Kilix::Voicegen)
+target_link_libraries(kilix-voicegen PRIVATE Kilix::Voicegen kilix_voicegen_frontend)
+target_include_directories(kilix-voicegen PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_compile_definitions(kilix-voicegen PRIVATE
   KGV_PROJECT_VERSION="${PROJECT_VERSION}")
 if(UNIX AND NOT APPLE)
@@ -87,6 +131,9 @@ install(TARGETS kilix_voicegen kilix-voicegen
 install(FILES include/kilix_voicegen.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(FILES LICENSE NOTICE THIRD_PARTY.md VERSION
   DESTINATION ${CMAKE_INSTALL_DATADIR}/kilix-voicegen)
+install(FILES "${KGV_UTF8PROC_SOURCE_DIR}/LICENSE.md"
+  DESTINATION ${CMAKE_INSTALL_DATADIR}/kilix-voicegen/licenses
+  RENAME utf8proc-LICENSE.md)
 install(DIRECTORY schemas/ DESTINATION ${CMAKE_INSTALL_DATADIR}/kilix-voicegen/schemas
   FILES_MATCHING PATTERN "*.json")
 install(EXPORT KilixVoicegenTargets
@@ -162,6 +209,7 @@ if(BUILD_TESTING)
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_conformance.py")
   set(KGV_CONFORMANCE_TEST_ENV
     "KGV_LIBRARY=$<TARGET_FILE:kilix_voicegen>"
+    "KGV_CLI=$<TARGET_FILE:kilix-voicegen>"
     "KGV_FIXTURE_DIR=${KGV_FIXTURE_MODEL_DIR}"
     "KGV_FIXTURE_SHA256=${KGV_FIXTURE_RELEASE_SHA}"
     "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/bindings/python"
@@ -192,4 +240,34 @@ if(BUILD_TESTING)
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_repository.py")
   set_tests_properties(repository_boundaries PROPERTIES ENVIRONMENT
     "PYTHONDONTWRITEBYTECODE=1")
+
+  add_test(NAME lexicon_candidate
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lexicon_candidate.py")
+  set(KGV_LEXICON_TEST_ENV
+    "KGV_LEXICON_TOOL=${CMAKE_CURRENT_SOURCE_DIR}/tools/build_en_au_lexicon_candidate.py"
+    "PYTHONDONTWRITEBYTECODE=1")
+  set_tests_properties(lexicon_candidate PROPERTIES ENVIRONMENT
+    "${KGV_LEXICON_TEST_ENV}")
+
+  add_executable(test_frontend tests/test_frontend.cpp)
+  target_link_libraries(test_frontend PRIVATE kilix_voicegen_frontend)
+  target_include_directories(test_frontend PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  kgv_project_warnings(test_frontend)
+  kgv_sanitizers(test_frontend)
+  add_test(NAME frontend_native COMMAND test_frontend)
+
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT KGV_ENABLE_SANITIZERS)
+    find_package(Threads REQUIRED)
+    add_executable(frontend_benchmark benchmarks/frontend_benchmark.cpp)
+    target_link_libraries(frontend_benchmark PRIVATE
+      kilix_voicegen_frontend Threads::Threads)
+    target_include_directories(frontend_benchmark PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/include
+      ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    kgv_project_warnings(frontend_benchmark)
+    add_test(NAME frontend_performance COMMAND frontend_benchmark)
+    set_tests_properties(frontend_performance PROPERTIES LABELS benchmark)
+  endif()
 endif()

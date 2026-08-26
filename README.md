@@ -9,9 +9,12 @@ at or above the selected Piper quality and CPU-operability floor.
 
 Phase 2 milestone P0 (foundation and frozen contracts) is complete. The
 repository provides the frozen C ABI draft, strict model-package verification,
-the first UTF-8/control validation slice, a native CLI, and a deterministic
-fixture engine. Milestone P1, the complete English frontend and two-voice
-recording pilot, is next. The fixture emits a quiet triangle-wave test signal so
+strict UTF-8/control validation, a typed lexical frontend trace, a native CLI,
+and a deterministic fixture engine. P1 implementation is active: the pinned
+utf8proc/Unicode 17 dependency now supplies NFC with original-byte spans, and the
+staged lexical/normalization vectors execute. Pronunciation resources, final
+model tokens, recording pilots, and neural inference remain open. The fixture
+emits a quiet triangle-wave test signal so
 streaming, backpressure, cancellation, corruption handling, and language
 bindings can be tested without a model.
 
@@ -24,14 +27,28 @@ recorded voice, downloaded checkpoint, or generated audio.
 
 ## Build and test
 
-An out-of-tree CMake build needs a C++17 compiler and Python 3.11 or newer. The
-foundation build has no network or third-party package requirement.
+An out-of-tree CMake build needs a C++17 compiler, Python 3.11 or newer, and a
+clean checkout of utf8proc at the exact revision in
+`cmake/dependencies.lock.json`. Point CMake at that source checkout; it is built
+statically and the installed runtime has no network or external-library lookup.
 
 ```sh
+export KGV_UTF8PROC_SOURCE_DIR=/path/to/utf8proc
 cmake --preset dev
 cmake --build --preset dev
 ctest --preset dev
 ```
+
+Inspect the current lexical slice without a model:
+
+```sh
+kilix-voicegen frontend --profile prose --text 'Meet at 09:05 on 2026-08-25.'
+printf '%s\n' '127.0.0.1:8080 --no-cache' |
+  kilix-voicegen frontend --profile terminal --stdin
+```
+
+The JSON trace is diagnostic output for development. It contains normalized
+words and source spans, but not yet reviewed pronunciations or model-token IDs.
 
 The sanitizer gate is:
 
@@ -79,3 +96,9 @@ Machine-readable schemas live in `schemas/`; executable conformance vectors
 live in `tests/conformance/`. Research notes, source snapshots, recordings,
 models, experiments, benchmark output, and implementation planning remain
 outside this source repository.
+
+`tools/build_en_au_lexicon_candidate.py` converts an explicitly hashed CMUdict
+snapshot into a deterministic candidate and Australian-review queue outside the
+tree. Its output records both source and generator revisions/hashes, is
+deliberately labelled unreviewed, and cannot enter a model or installed package
+until the General Australian pronunciation gate is signed off.

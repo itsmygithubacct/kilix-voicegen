@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:kilix:voicegen:schema:frontend-lexical-trace:v1",
+  "title": "Kilix Voicegen bounded lexical frontend trace",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "dialect", "profile", "status", "input_bytes", "ignored_control_sequences", "words", "phrases", "diagnostics"],
+  "properties": {
+    "schema": {"const": "kilix.voicegen.frontend-lexical-trace/v1"},
+    "dialect": {"const": "en-AU"},
+    "profile": {"enum": ["prose", "terminal"]},
+    "status": {"type": "string", "pattern": "^KGV_[A-Z0-9_]+$"},
+    "failure_code": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$"},
+    "failure_byte_offset": {"type": "integer", "minimum": 0, "maximum": 65536},
+    "input_bytes": {"type": "integer", "minimum": 0, "maximum": 65536},
+    "ignored_control_sequences": {"type": "integer", "minimum": 0},
+    "words": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["normalized", "source_kind", "span"],
+        "properties": {
+          "normalized": {"type": "string", "minLength": 1},
+          "source_kind": {"enum": ["LITERAL", "EXPANSION", "ALIAS", "SPELLING"]},
+          "span": {"$ref": "#/$defs/span"}
+        }
+      }
+    },
+    "phrases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["word_start", "word_end", "terminator", "span"],
+        "properties": {
+          "word_start": {"type": "integer", "minimum": 0},
+          "word_end": {"type": "integer", "minimum": 0},
+          "terminator": {"enum": ["END_NONE", "END_COMMA", "END_COLON", "END_SEMICOLON", "END_PERIOD", "END_QUESTION", "END_EXCLAMATION", "END_PARAGRAPH", "END_CONTINUATION"]},
+          "span": {"$ref": "#/$defs/span"}
+        }
+      }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "severity", "span"],
+        "properties": {
+          "code": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$"},
+          "severity": {"enum": ["INFO", "WARNING", "ERROR"]},
+          "span": {"$ref": "#/$defs/span"}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "span": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["byte_start", "byte_end"],
+      "properties": {
+        "byte_start": {"type": "integer", "minimum": 0, "maximum": 65536},
+        "byte_end": {"type": "integer", "minimum": 0, "maximum": 65536}
+      }
+    }
+  }
+}

@@ -3,7 +3,11 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
+#include <limits>
 #include <sstream>
+
+#include <utf8proc.h>
 
 namespace kgv {
 namespace {
@@ -219,11 +223,15 @@ int analyze_frontend(std::string_view text,
             std::size_t next = 0U;
             if (text[offset + 1U] == '[' && scan_csi(text, offset + 2U, &next)) {
                 ++analysis->ignored_control_sequences;
+                analysis->control_sequences.push_back(
+                    FrontendControlSequence{offset, next});
                 offset = next;
                 continue;
             }
             if (text[offset + 1U] == ']' && scan_osc(text, offset + 2U, &next)) {
                 ++analysis->ignored_control_sequences;
+                analysis->control_sequences.push_back(
+                    FrontendControlSequence{offset, next});
                 offset = next;
                 continue;
             }
@@ -234,6 +242,8 @@ int analyze_frontend(std::string_view text,
             std::size_t next = 0U;
             if (scan_csi(text, offset + decoded.size, &next)) {
                 ++analysis->ignored_control_sequences;
+                analysis->control_sequences.push_back(
+                    FrontendControlSequence{offset, next});
                 offset = next;
                 continue;
             }
@@ -244,6 +254,8 @@ int analyze_frontend(std::string_view text,
             std::size_t next = 0U;
             if (scan_osc(text, offset + decoded.size, &next)) {
                 ++analysis->ignored_control_sequences;
+                analysis->control_sequences.push_back(
+                    FrontendControlSequence{offset, next});
                 offset = next;
                 continue;
             }
@@ -257,6 +269,8 @@ int analyze_frontend(std::string_view text,
         if (!permitted_whitespace(decoded.scalar)) {
             ++analysis->spoken_scalar_count;
         }
+        analysis->visible_scalars.push_back(
+            FrontendScalar{decoded.scalar, offset, offset + decoded.size});
         offset += decoded.size;
     }
     return KGV_OK;
@@ -270,6 +284,85 @@ bool is_utf8_boundary(std::string_view text, std::size_t offset) noexcept {
         return false;
     }
     return !continuation(static_cast<unsigned char>(text[offset]));
+}
+
+int normalize_frontend_nfc(std::string_view text,
+                           const std::vector<FrontendScalar> &input,
+                           std::vector<FrontendScalar> *output,
+                           FrontendFailure *failure) {
+    if (output == nullptr || failure == nullptr) {
+        return KGV_INVALID_ARGUMENT;
+    }
+    output->clear();
+    if (input.empty()) {
+        return KGV_OK;
+    }
+
+    auto normalize_cluster = [&](std::size_t begin, std::size_t end) -> int {
+        std::string cluster;
+        for (std::size_t index = begin; index < end; ++index) {
+            const FrontendScalar &scalar = input[index];
+            cluster.append(text.substr(scalar.byte_start, scalar.byte_end - scalar.byte_start));
+        }
+        if (cluster.size() > static_cast<std::size_t>(
+                                 std::numeric_limits<utf8proc_ssize_t>::max())) {
+            return reject(failure, KGV_INPUT_TOO_LARGE, "NORMALIZATION_INPUT_TOO_LARGE",
+                          "normalization cluster exceeds the supported size", input[begin].byte_start);
+        }
+        utf8proc_uint8_t *mapped = nullptr;
+        const utf8proc_ssize_t mapped_size = utf8proc_map(
+            reinterpret_cast<const utf8proc_uint8_t *>(cluster.data()),
+            static_cast<utf8proc_ssize_t>(cluster.size()), &mapped,
+            static_cast<utf8proc_option_t>(UTF8PROC_STABLE | UTF8PROC_COMPOSE));
+        if (mapped_size < 0 || mapped == nullptr) {
+            std::free(mapped);
+            return reject(failure, KGV_INTERNAL_ERROR, "NFC_NORMALIZATION_FAILED",
+                          "utf8proc could not normalize validated UTF-8", input[begin].byte_start);
+        }
+        const std::size_t cluster_byte_start = input[begin].byte_start;
+        const std::size_t cluster_byte_end = input[end - 1U].byte_end;
+        utf8proc_ssize_t offset = 0;
+        while (offset < mapped_size) {
+            utf8proc_int32_t codepoint = 0;
+            const utf8proc_ssize_t consumed = utf8proc_iterate(
+                mapped + offset, mapped_size - offset, &codepoint);
+            if (consumed <= 0) {
+                std::free(mapped);
+                return reject(failure, KGV_INTERNAL_ERROR, "NFC_NORMALIZATION_DRIFT",
+                              "utf8proc emitted invalid normalized UTF-8", input[begin].byte_start);
+            }
+            output->push_back(FrontendScalar{
+                static_cast<std::uint32_t>(codepoint),
+                cluster_byte_start,
+                cluster_byte_end,
+            });
+            offset += consumed;
+        }
+        std::free(mapped);
+        return KGV_OK;
+    };
+
+    std::size_t cluster_begin = 0U;
+    utf8proc_int32_t grapheme_state = 0;
+    for (std::size_t index = 1U; index < input.size(); ++index) {
+        const bool discontinuity = input[index - 1U].byte_end != input[index].byte_start;
+        bool boundary = discontinuity;
+        if (!discontinuity) {
+            boundary = utf8proc_grapheme_break_stateful(
+                           static_cast<utf8proc_int32_t>(input[index - 1U].value),
+                           static_cast<utf8proc_int32_t>(input[index].value),
+                           &grapheme_state) != 0;
+        }
+        if (boundary) {
+            const int status = normalize_cluster(cluster_begin, index);
+            if (status != KGV_OK) {
+                return status;
+            }
+            cluster_begin = index;
+            grapheme_state = 0;
+        }
+    }
+    return normalize_cluster(cluster_begin, input.size());
 }
 
 }  // namespace kgv

@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Execute the frozen P0 slice and inventory the complete Phase 2 vector set."""
+"""Execute the frozen Unicode/control and lexical frontend vector set."""
 
 from __future__ import annotations
 
 import json
 import os
 import pathlib
+import subprocess
 import unittest
 from typing import Any
 
@@ -26,6 +27,7 @@ class FrontendConformanceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.native = NativeLibrary(os.environ["KGV_LIBRARY"])
+        cls.cli = os.environ["KGV_CLI"]
         cls.engine = cls.native.open_engine(
             os.environ["KGV_FIXTURE_DIR"], os.environ["KGV_FIXTURE_SHA256"])
 
@@ -33,7 +35,7 @@ class FrontendConformanceTests(unittest.TestCase):
     def tearDownClass(cls) -> None:
         cls.engine.close()
 
-    def test_vectors_are_unique_versioned_and_p0_is_executable(self) -> None:
+    def test_vectors_are_unique_versioned_and_executable(self) -> None:
         records: list[dict[str, Any]] = []
         with VECTORS.open(encoding="utf-8") as stream:
             for line_number, line in enumerate(stream, 1):
@@ -81,6 +83,76 @@ class FrontendConformanceTests(unittest.TestCase):
                 self.assertEqual(actual_status, expected_status)
                 if expected_status is Status.OK:
                     self.assertEqual(audio, record["expect"]["audio"])
+
+        for record in planned:
+            with self.subTest(vector=record["id"]):
+                profile = record["profile"]
+                completed = subprocess.run(
+                    [self.cli, "frontend", "--profile", profile, "--stdin"],
+                    input=materialize(record["input"]), stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE, check=False, timeout=5)
+                self.assertIn(completed.returncode, (0, 1), completed.stderr)
+                trace = json.loads(completed.stdout)
+                self.assertEqual(trace["schema"],
+                                 "kilix.voicegen.frontend-lexical-trace/v1")
+                self.assertEqual(trace["status"], record["expect"]["status"])
+                if "words" in record["expect"]:
+                    self.assertEqual(
+                        [word["normalized"] for word in trace["words"]],
+                        record["expect"]["words"])
+                if "word_spans" in record["expect"]:
+                    self.assertEqual(
+                        [[word["span"]["byte_start"], word["span"]["byte_end"]]
+                         for word in trace["words"]],
+                        record["expect"]["word_spans"])
+                if "diagnostics" in record["expect"]:
+                    actual = [diagnostic["code"] for diagnostic in trace["diagnostics"]]
+                    for expected in record["expect"]["diagnostics"]:
+                        self.assertIn(expected, actual)
+                if "diagnostic_spans" in record["expect"]:
+                    self.assertEqual(
+                        [{"code": diagnostic["code"],
+                          "span": [diagnostic["span"]["byte_start"],
+                                   diagnostic["span"]["byte_end"]]}
+                         for diagnostic in trace["diagnostics"]],
+                        record["expect"]["diagnostic_spans"])
+                if "ignored_control_sequences" in record["expect"]:
+                    self.assertEqual(trace["ignored_control_sequences"],
+                                     record["expect"]["ignored_control_sequences"])
+                if "terminator" in record["expect"]:
+                    self.assertIn(
+                        record["expect"]["terminator"],
+                        [phrase["terminator"] for phrase in trace["phrases"]])
+                if "terminators" in record["expect"]:
+                    self.assertEqual(
+                        [phrase["terminator"] for phrase in trace["phrases"]],
+                        record["expect"]["terminators"])
+
+    def test_frontend_is_locale_and_timezone_independent(self) -> None:
+        cases = [
+            ("prose", "08/09/2010 and $1.05"),
+            ("prose", "cafe\u0301 — £2"),
+            ("terminal", "$HOME 127.0.0.1:8080 README.md"),
+        ]
+        environments = [
+            ("C", "UTC"),
+            ("C.UTF-8", "Australia/Sydney"),
+        ]
+        for profile, source in cases:
+            outputs: list[bytes] = []
+            for locale, timezone in environments:
+                environment = os.environ.copy()
+                environment["LC_ALL"] = locale
+                environment["LANG"] = locale
+                environment["TZ"] = timezone
+                completed = subprocess.run(
+                    [self.cli, "frontend", "--profile", profile, "--stdin"],
+                    input=source.encode("utf-8"), stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE, check=False, timeout=5,
+                    env=environment)
+                self.assertIn(completed.returncode, (0, 1), completed.stderr)
+                outputs.append(completed.stdout)
+            self.assertEqual(outputs[0], outputs[1], source)
 
 
 if __name__ == "__main__":

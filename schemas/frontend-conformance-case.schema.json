@@ -9,7 +9,7 @@
     "schema": {"const": "kilix.voicegen.frontend-conformance-case/v1"},
     "dialect": {"const": "en-AU"},
     "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,95}$"},
-    "stage": {"enum": ["p0-unicode-control", "p1-lexical", "p1-pronunciation", "p1-chunking"]},
+    "stage": {"enum": ["p0-unicode-control", "p1-unicode-nfc", "p1-lexical", "p1-pronunciation", "p1-chunking"]},
     "profile": {"enum": ["prose", "terminal"]},
     "input": {
       "oneOf": [
@@ -26,8 +26,47 @@
         "status": {"type": "string", "pattern": "^KGV_[A-Z0-9_]+$"},
         "audio": {"type": "boolean"},
         "words": {"type": "array", "items": {"type": "string"}},
+        "word_spans": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "prefixItems": [
+              {"type": "integer", "minimum": 0, "maximum": 65536},
+              {"type": "integer", "minimum": 0, "maximum": 65536}
+            ],
+            "items": false,
+            "minItems": 2,
+            "maxItems": 2
+          }
+        },
         "diagnostics": {"type": "array", "items": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]+$"}},
-        "terminator": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]+$"}
+        "diagnostic_spans": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["code", "span"],
+            "properties": {
+              "code": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]+$"},
+              "span": {
+                "type": "array",
+                "prefixItems": [
+                  {"type": "integer", "minimum": 0, "maximum": 65536},
+                  {"type": "integer", "minimum": 0, "maximum": 65536}
+                ],
+                "items": false,
+                "minItems": 2,
+                "maxItems": 2
+              }
+            }
+          }
+        },
+        "ignored_control_sequences": {"type": "integer", "minimum": 0},
+        "terminator": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]+$"},
+        "terminators": {
+          "type": "array",
+          "items": {"type": "string", "pattern": "^END_[A-Z0-9_]+$"}
+        }
       }
     }
   }

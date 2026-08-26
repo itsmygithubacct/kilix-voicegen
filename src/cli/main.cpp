@@ -17,6 +17,8 @@
 #include <utility>
 #include <vector>
 
+#include "frontend/pipeline.h"
+
 namespace {
 
 struct Arguments final {
@@ -37,6 +39,7 @@ void usage(std::ostream &stream) {
         "  kilix-voicegen --version\n"
         "  kilix-voicegen --abi-version\n"
         "  kilix-voicegen verify --model DIR --release-sha HEX\n"
+        "  kilix-voicegen frontend --profile prose|terminal (--stdin | --text UTF8)\n"
         "  kilix-voicegen synthesize --model DIR --release-sha HEX\n"
         "      --voice kilix-female-01|kilix-male-01 --profile prose|terminal\n"
         "      (--stdin | --text UTF8) --output FILE.wav [--rate 0.70..1.50]\n"
@@ -240,6 +243,44 @@ int verify_command(const Arguments &arguments) {
     return 0;
 }
 
+int frontend_command(Arguments arguments) {
+    if (arguments.profile.empty()) {
+        std::cerr << "frontend requires --profile prose or terminal\n";
+        return 2;
+    }
+    if (arguments.read_stdin == !arguments.text.empty()) {
+        std::cerr << "frontend requires exactly one of --stdin or --text\n";
+        return 2;
+    }
+    if (arguments.read_stdin) {
+        std::string input_error;
+        if (!read_bounded_stdin(&arguments.text, &input_error)) {
+            std::cerr << input_error << '\n';
+            return 2;
+        }
+    }
+    std::uint32_t profile = 0U;
+    if (arguments.profile == "prose") {
+        profile = KGV_PROFILE_PROSE;
+    } else if (arguments.profile == "terminal") {
+        profile = KGV_PROFILE_TERMINAL;
+    } else {
+        std::cerr << "--profile must be prose or terminal\n";
+        return 2;
+    }
+    if (!arguments.model.empty() || !arguments.release_sha.empty() ||
+        !arguments.voice.empty() || !arguments.output.empty()) {
+        std::cerr << "frontend does not accept model, release, voice, or output options\n";
+        return 2;
+    }
+
+    kgv::LexicalFrontendResult result;
+    kgv::FrontendFailure failure;
+    const int status = kgv::run_lexical_frontend(arguments.text, profile, &result, &failure);
+    std::cout << kgv::lexical_frontend_json(result, status, failure);
+    return status == KGV_OK ? 0 : 1;
+}
+
 int synthesize_command(Arguments arguments) {
     if (arguments.model.empty() || arguments.release_sha.empty() || arguments.voice.empty() ||
         arguments.profile.empty() || arguments.output.empty()) {
@@ -364,6 +405,9 @@ int run_cli(int argc, char **argv) {
     }
     if (command == "verify") {
         return verify_command(arguments);
+    }
+    if (command == "frontend") {
+        return frontend_command(std::move(arguments));
     }
     if (command == "synthesize") {
         return synthesize_command(std::move(arguments));

@@ -9,7 +9,7 @@
       "unicode_version": "17.0.0",
       "source": "https://github.com/JuliaStrings/utf8proc.git",
       "license": "MIT-Expat plus Unicode data notices",
-      "enabled_in_foundation_fixture": false
+      "enabled_in_foundation_fixture": true
     },
     {
       "name": "onnxruntime",
