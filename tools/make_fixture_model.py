@@ -74,6 +74,7 @@ def build_manifest(graph_bytes: bytes) -> JsonObject:
             "sha256": _sha256(graph_bytes),
         }],
         "frontend": {
+            "dialect": "en-AU",
             "inventory_sha256": _sha256(inventory),
             "schema": "kilix.voicegen.frontend/v1",
             "segment_ids": [1, 2, 3, 4],

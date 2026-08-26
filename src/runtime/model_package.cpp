@@ -277,13 +277,16 @@ void verify_audio(const json::Value &value, VerifiedModel *model) {
 
 void verify_frontend(const json::Value &value, VerifiedModel *model) {
     const auto &object = object_value(value);
-    if (!exact_keys(object, {"schema", "unicode_version", "token_schema",
+    if (!exact_keys(object, {"schema", "dialect", "unicode_version", "token_schema",
                              "inventory_sha256", "segment_ids"})) {
         invalid("frontend metadata fields do not match schema v1");
     }
     if (string_value(required(object, "schema")) != "kilix.voicegen.frontend/v1" ||
         string_value(required(object, "token_schema")) != "kilix.voicegen.tokens/v1") {
         unsupported_schema("model frontend or token schema is not supported");
+    }
+    if (string_value(required(object, "dialect")) != "en-AU") {
+        unsupported_schema("model frontend dialect is not supported");
     }
     if (string_value(required(object, "unicode_version")) != "17.0.0") {
         unsupported_schema("model Unicode version is not supported");

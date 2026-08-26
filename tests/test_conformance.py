@@ -50,6 +50,7 @@ class FrontendConformanceTests(unittest.TestCase):
         self.assertTrue(all(record["schema"] ==
                             "kilix.voicegen.frontend-conformance-case/v1"
                             for record in records))
+        self.assertTrue(all(record["dialect"] == "en-AU" for record in records))
         p0 = [record for record in records if record["stage"] == "p0-unicode-control"]
         planned = [record for record in records if record["stage"] != "p0-unicode-control"]
         self.assertGreaterEqual(len(p0), 25)

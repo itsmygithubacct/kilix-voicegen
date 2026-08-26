@@ -83,6 +83,16 @@ class ModelVerifierTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.assert_native_status(directory, release_sha, Status.ABI_MISMATCH)
 
+    def test_non_australian_frontend_fails_closed(self) -> None:
+        def mutate(manifest: dict[str, Any]) -> None:
+            manifest["frontend"]["dialect"] = "en-US"
+
+        directory, release_sha, temporary = self.make_model(mutate)
+        self.addCleanup(temporary.cleanup)
+        with self.assertRaises(VERIFIER.VerificationError):
+            VERIFIER.verify_model(directory, release_sha)
+        self.assert_native_status(directory, release_sha, Status.UNSUPPORTED_SCHEMA)
+
     def test_unknown_cpu_requirement_fails_closed(self) -> None:
         def mutate(manifest: dict[str, Any]) -> None:
             manifest["required_cpu_features"] = ["future-vector-999"]

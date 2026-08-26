@@ -2,8 +2,8 @@
 
 Kilix Voicegen is a private, offline English text-to-speech engine under active
 development. Its v1 product target is one original female-presenting voice and
-one original male-presenting voice at or above the selected Piper quality and
-CPU-operability floor.
+one original male-presenting voice, both speaking General Australian English,
+at or above the selected Piper quality and CPU-operability floor.
 
 ## Current status
 
@@ -14,6 +14,10 @@ fixture engine. Milestone P1, the complete English frontend and two-voice
 recording pilot, is next. The fixture emits a quiet triangle-wave test signal so
 streaming, backpressure, cancellation, corruption handling, and language
 bindings can be tested without a model.
+
+The v1 frontend and model contract is fixed to `en-AU`; it has no automatic
+dialect chooser. British English, then General American English, are
+whole-release recruitment/licensing fallbacks that require a new contract.
 
 **This snapshot does not yet produce speech.** It contains no trained model,
 recorded voice, downloaded checkpoint, or generated audio.
@@ -61,6 +65,8 @@ speech. Generated audio and model packages must stay outside this repository.
 
 - strict UTF-8 input, explicit `prose` or `terminal` profile, and a 64 KiB hard
   request ceiling;
+- one implicit General Australian English (`en-AU`) frontend shared by both
+  voices;
 - exactly `kilix-female-01` and `kilix-male-01` in the v1 model contract;
 - synchronous 20 ms PCM callbacks at 24 kHz, with consumer backpressure and
   thread-safe cancellation;

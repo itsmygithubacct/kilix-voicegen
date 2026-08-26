@@ -4,9 +4,10 @@
   "title": "Kilix Voicegen typed English frontend result",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "profile", "unicode_version", "input_bytes", "tokens", "words", "phrases", "chunks", "diagnostics"],
+  "required": ["schema", "dialect", "profile", "unicode_version", "input_bytes", "tokens", "words", "phrases", "chunks", "diagnostics"],
   "properties": {
     "schema": {"const": "kilix.voicegen.frontend-result/v1"},
+    "dialect": {"const": "en-AU"},
     "profile": {"enum": ["prose", "terminal"]},
     "unicode_version": {"const": "17.0.0"},
     "input_bytes": {"type": "integer", "minimum": 0, "maximum": 65536},

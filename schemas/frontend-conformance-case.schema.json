@@ -4,9 +4,10 @@
   "title": "One executable or planned English frontend conformance case",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "id", "stage", "profile", "input", "expect"],
+  "required": ["schema", "dialect", "id", "stage", "profile", "input", "expect"],
   "properties": {
     "schema": {"const": "kilix.voicegen.frontend-conformance-case/v1"},
+    "dialect": {"const": "en-AU"},
     "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,95}$"},
     "stage": {"enum": ["p0-unicode-control", "p1-lexical", "p1-pronunciation", "p1-chunking"]},
     "profile": {"enum": ["prose", "terminal"]},

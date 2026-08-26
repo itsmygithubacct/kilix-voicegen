@@ -4,9 +4,10 @@
   "title": "Kilix Voicegen strict model-token record",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "inventory_sha256", "chunks"],
+  "required": ["schema", "dialect", "inventory_sha256", "chunks"],
   "properties": {
     "schema": {"const": "kilix.voicegen.tokens/v1"},
+    "dialect": {"const": "en-AU"},
     "inventory_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "chunks": {
       "type": "array",

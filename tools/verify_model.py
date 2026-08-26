@@ -120,7 +120,10 @@ def verify_model(directory: pathlib.Path, expected_release_sha256: str) -> dict[
 
     frontend = manifest["frontend"]
     if (not isinstance(frontend, dict)
+            or set(frontend) != {"schema", "dialect", "unicode_version", "token_schema",
+                                "inventory_sha256", "segment_ids"}
             or frontend.get("schema") != "kilix.voicegen.frontend/v1"
+            or frontend.get("dialect") != "en-AU"
             or frontend.get("token_schema") != "kilix.voicegen.tokens/v1"
             or frontend.get("unicode_version") != "17.0.0"
             or frontend.get("segment_ids") != [1, 2, 3, 4]):
