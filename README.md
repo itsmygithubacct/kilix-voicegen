@@ -150,6 +150,19 @@ text, an unknown segment, or an ambiguous phone target fails with the indexed
 override and no partial output. This seam uses synthetic fixtures only and is
 not yet called by the public synthesis engine.
 
+An optional strict contextual-heteronym JSONL resource can now assign a role
+when the caller did not provide one and no exact phone override owns the word.
+The resource is hash-bound to the exact base lexicon and, in product admission,
+to the same review record. Rules inspect only canonical target words, exact
+capitalization and clause position, and sorted literal word predicates within a
+three-word window on either side, with at most 64 rules for one target. Every
+rule role and documented default must exist in the bound lexicon. Exactly one
+match selects the role; no match emits `HETERONYM_DEFAULTED`, while overlap
+emits `HETERONYM_RULE_AMBIGUOUS` and then uses the documented default. Rule
+hash, role source, and rule ID remain in the internal result. Current rules and
+tests are first-party synthetic fixtures; there is no product-admitted
+Australian rule table yet.
+
 `tools/build_en_au_lexicon_candidate.py` converts an explicitly hashed CMUdict
 snapshot into a deterministic candidate and Australian-review queue outside the
 tree. Its output records both source and generator revisions/hashes, is

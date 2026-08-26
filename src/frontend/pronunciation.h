@@ -54,6 +54,8 @@ public:
     const PronunciationEntry *find(std::string_view grapheme,
                                    std::string_view role) const;
     bool contains_grapheme(std::string_view grapheme) const;
+    bool contains_role(std::string_view grapheme,
+                       std::string_view role) const;
 
     const std::string &resource_id() const noexcept;
     const std::string &resource_sha256() const noexcept;

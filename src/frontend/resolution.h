@@ -7,6 +7,7 @@
 #include <string_view>
 #include <vector>
 
+#include "frontend/heteronyms.h"
 #include "frontend/lts.h"
 #include "frontend/overrides.h"
 #include "frontend/pipeline.h"
@@ -24,10 +25,18 @@ enum class ResolvedPronunciationSource {
     spelling,
 };
 
+enum class ResolvedRoleSource {
+    default_role,
+    explicit_request,
+    contextual_rule,
+};
+
 struct ResolvedFrontendWord final {
     std::string normalized;
     std::string source_kind;
     std::string role;
+    ResolvedRoleSource role_source = ResolvedRoleSource::default_role;
+    std::string context_rule_id;
     ResolvedPronunciationSource pronunciation_source =
         ResolvedPronunciationSource::base_lexicon;
     RequestOverrideKind request_override_kind =
@@ -41,6 +50,7 @@ struct ResolvedFrontendWord final {
 struct ResolvedFrontendResources final {
     const PronunciationLexicon *base_lexicon = nullptr;
     const PronunciationLexicon *user_dictionary = nullptr;
+    const HeteronymRules *heteronym_rules = nullptr;
     const LtsModel *lts = nullptr;
     const ModelTokenInventory *model_tokens = nullptr;
     PronunciationAdmission required_admission =
@@ -54,6 +64,7 @@ struct ResolvedFrontendResult final {
     std::size_t request_override_count = 0U;
     std::string frontend_abi_sha256;
     std::string user_dictionary_sha256;
+    std::string heteronym_rules_sha256;
     std::string pronunciation_lexicon_sha256;
     std::string lts_sha256;
     std::vector<ResolvedFrontendWord> words;
@@ -92,6 +103,7 @@ int run_resolved_frontend(
 
 const char *resolved_pronunciation_source_name(
     ResolvedPronunciationSource value) noexcept;
+const char *resolved_role_source_name(ResolvedRoleSource value) noexcept;
 
 }  // namespace kgv
 

@@ -156,6 +156,37 @@ int validate_resources(const ResolvedFrontendResources &resources,
                           "local user dictionary must not claim product review");
         }
     }
+    if (resources.heteronym_rules != nullptr) {
+        const HeteronymRules &rules = *resources.heteronym_rules;
+        if (rules.resource_sha256().empty()) {
+            return reject(result, failure, KGV_INVALID_STATE,
+                          "FRONTEND_HETERONYM_RULES_NOT_LOADED",
+                          "contextual heteronym rules are not loaded");
+        }
+        if (rules.admission() != resources.required_admission) {
+            return reject(result, failure, KGV_ABI_MISMATCH,
+                          "FRONTEND_HETERONYM_ADMISSION_MISMATCH",
+                          "heteronym rules do not share the base admission");
+        }
+        if (rules.base_lexicon_sha256() != lexicon.resource_sha256()) {
+            return reject(result, failure, KGV_ABI_MISMATCH,
+                          "FRONTEND_HETERONYM_LEXICON_MISMATCH",
+                          "heteronym rules target another base lexicon");
+        }
+        if (!rules.compatible_with(lexicon)) {
+            return reject(result, failure, KGV_ABI_MISMATCH,
+                          "FRONTEND_HETERONYM_ROLE_MISMATCH",
+                          "heteronym rules lack exact role and default variants in the base lexicon");
+        }
+        if (resources.required_admission ==
+                PronunciationAdmission::product_admitted &&
+            rules.review_record_sha256() !=
+                lexicon.review_record_sha256()) {
+            return reject(result, failure, KGV_ABI_MISMATCH,
+                          "FRONTEND_HETERONYM_REVIEW_MISMATCH",
+                          "product heteronym rules and lexicon lack one review binding");
+        }
+    }
     if (lts.source_lexicon_sha256() != lexicon.resource_sha256()) {
         return reject(result, failure, KGV_ABI_MISMATCH,
                       "FRONTEND_LTS_LEXICON_MISMATCH",
@@ -233,6 +264,16 @@ int run_resolved_frontend(
                       "word-role count does not match expanded frontend words");
     }
 
+    std::vector<std::pair<std::size_t, std::size_t>> clause_bounds(
+        lexical.words.size(), {0U, lexical.words.size()});
+    for (const LexicalPhrase &phrase : lexical.phrases) {
+        for (std::size_t word_index = phrase.word_start;
+             word_index < phrase.word_end &&
+             word_index < clause_bounds.size(); ++word_index) {
+            clause_bounds[word_index] = {phrase.word_start, phrase.word_end};
+        }
+    }
+
     result->profile = lexical.profile;
     result->input_bytes = lexical.input_bytes;
     result->request_override_count = request_overrides.size();
@@ -240,6 +281,10 @@ int run_resolved_frontend(
     if (resources.user_dictionary != nullptr) {
         result->user_dictionary_sha256 =
             resources.user_dictionary->resource_sha256();
+    }
+    if (resources.heteronym_rules != nullptr) {
+        result->heteronym_rules_sha256 =
+            resources.heteronym_rules->resource_sha256();
     }
     result->pronunciation_lexicon_sha256 =
         resources.base_lexicon->resource_sha256();
@@ -251,9 +296,41 @@ int run_resolved_frontend(
     token_words.reserve(lexical.words.size());
     for (std::size_t index = 0U; index < lexical.words.size(); ++index) {
         const LexicalWord &lexical_word = lexical.words[index];
-        const std::string role = word_roles.empty() || word_roles[index].empty()
-                                     ? "default"
-                                     : word_roles[index];
+        const bool explicit_role =
+            !word_roles.empty() && !word_roles[index].empty();
+        std::string role = explicit_role ? word_roles[index] : "default";
+        ResolvedRoleSource role_source =
+            explicit_role ? ResolvedRoleSource::explicit_request
+                          : ResolvedRoleSource::default_role;
+        std::string context_rule_id;
+        const bool phone_override =
+            overridden_lexical.phone_override_by_word[index].has_value();
+        if (!explicit_role && !phone_override &&
+            resources.heteronym_rules != nullptr) {
+            const HeteronymDecision decision =
+                resources.heteronym_rules->decide(
+                    lexical.words, index, clause_bounds[index].first,
+                    clause_bounds[index].second);
+            if (decision.kind == HeteronymDecisionKind::matched) {
+                role = decision.role;
+                role_source = ResolvedRoleSource::contextual_rule;
+                context_rule_id = decision.rule_id;
+            } else if (decision.kind ==
+                       HeteronymDecisionKind::ambiguous) {
+                result->diagnostics.push_back(FrontendDiagnostic{
+                    "HETERONYM_RULE_AMBIGUOUS", "WARNING",
+                    lexical_word.span,
+                });
+                result->diagnostics.push_back(FrontendDiagnostic{
+                    "HETERONYM_DEFAULTED", "WARNING", lexical_word.span,
+                });
+            } else if (decision.kind ==
+                       HeteronymDecisionKind::no_match) {
+                result->diagnostics.push_back(FrontendDiagnostic{
+                    "HETERONYM_DEFAULTED", "WARNING", lexical_word.span,
+                });
+            }
+        }
         if (!stable_role(role)) {
             return reject(result, failure, KGV_INVALID_ARGUMENT,
                           "INVALID_FRONTEND_WORD_ROLE",
@@ -265,6 +342,8 @@ int run_resolved_frontend(
         resolved.normalized = lexical_word.normalized;
         resolved.source_kind = lexical_word.source_kind;
         resolved.role = role;
+        resolved.role_source = role_source;
+        resolved.context_rule_id = std::move(context_rule_id);
         resolved.span = lexical_word.span;
         if (overridden_lexical.replacement_override_by_word[index]
                 .has_value()) {
@@ -414,6 +493,15 @@ const char *resolved_pronunciation_source_name(
             return "PRODUCT_LEXICON";
         case ResolvedPronunciationSource::lts: return "LTS";
         case ResolvedPronunciationSource::spelling: return "SPELLING";
+    }
+    return "UNKNOWN";
+}
+
+const char *resolved_role_source_name(ResolvedRoleSource value) noexcept {
+    switch (value) {
+        case ResolvedRoleSource::default_role: return "DEFAULT";
+        case ResolvedRoleSource::explicit_request: return "EXPLICIT_REQUEST";
+        case ResolvedRoleSource::contextual_rule: return "CONTEXTUAL_RULE";
     }
     return "UNKNOWN";
 }

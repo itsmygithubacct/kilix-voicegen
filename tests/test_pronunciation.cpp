@@ -174,6 +174,12 @@ int main() {
                     !lexicon.contains_grapheme("KILIX") &&
                     !lexicon.contains_grapheme("absent"),
                 "known-grapheme index changed case or membership semantics");
+        require(lexicon.contains_role("RECORD", "noun") &&
+                    lexicon.contains_role("record", "verb") &&
+                    !lexicon.contains_role("record", "default") &&
+                    !lexicon.contains_role("absent", "noun") &&
+                    !lexicon.contains_role("record", "NotCanonical"),
+                "exact role-membership query changed semantics");
 
         {
             kgv::PronunciationLexicon rejected = lexicon;

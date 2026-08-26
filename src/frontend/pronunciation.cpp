@@ -567,6 +567,22 @@ bool PronunciationLexicon::contains_grapheme(
     return ascii_fold(grapheme, &folded) && lookup('f', folded);
 }
 
+bool PronunciationLexicon::contains_role(
+    std::string_view grapheme, std::string_view role) const {
+    if (grapheme.empty() || grapheme.size() > kMaximumGraphemeBytes ||
+        !stable_role(role)) {
+        return false;
+    }
+    const auto lookup = [&](char mode, std::string_view key_grapheme) {
+        return index_.find(index_key(mode, key_grapheme, role)) != index_.end();
+    };
+    if (lookup('e', grapheme)) {
+        return true;
+    }
+    std::string folded;
+    return ascii_fold(grapheme, &folded) && lookup('f', folded);
+}
+
 const std::string &PronunciationLexicon::resource_id() const noexcept {
     return resource_id_;
 }

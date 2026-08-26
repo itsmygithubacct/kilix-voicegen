@@ -66,7 +66,7 @@ std::string pronunciation_fixture(
     std::string_view review) {
     std::string resource =
         "{\"admission\":\"" + admission_name(admission) +
-        "\",\"dialect\":\"en-AU\",\"entry_count\":3," +
+        "\",\"dialect\":\"en-AU\",\"entry_count\":9," +
         "\"resource_id\":\"kilix-en-au-resolution-lexicon-test-1\"," +
         "\"review_record_sha256\":" + review_json(review) +
         ",\"schema\":\"kilix.voicegen.pronunciation-lexicon/v1\"," +
@@ -79,9 +79,68 @@ std::string pronunciation_fixture(
         "record", "[\"verb\"]",
         "[{\"segments\":[\"B\"],\"stress\":\"primary\"}]");
     resource += pronunciation_entry(
+        "record", "[\"default\"]",
+        "[{\"segments\":[\"K\"],\"stress\":\"primary\"}]");
+    resource += pronunciation_entry(
         "cat", "[\"default\"]",
         "[{\"segments\":[\"K\",\"AE\",\"T\"],"
         "\"stress\":\"primary\"}]");
+    resource += pronunciation_entry(
+        "i", "[\"default\"]",
+        "[{\"segments\":[\"AE\"],\"stress\":\"primary\"}]");
+    resource += pronunciation_entry(
+        "will", "[\"default\"]",
+        "[{\"segments\":[\"B\"],\"stress\":\"primary\"}]");
+    resource += pronunciation_entry(
+        "a", "[\"default\"]",
+        "[{\"segments\":[\"AE\"],\"stress\":\"none\"}]");
+    resource += pronunciation_entry(
+        "lead", "[\"noun\"]",
+        "[{\"segments\":[\"K\"],\"stress\":\"primary\"}]");
+    resource += pronunciation_entry(
+        "lead", "[\"verb\"]",
+        "[{\"segments\":[\"B\"],\"stress\":\"primary\"}]");
+    return resource;
+}
+
+std::string heteronym_rule(std::string_view id,
+                           std::string_view role,
+                           std::string_view capitalization,
+                           std::string_view conditions) {
+    return "{\"capitalization\":\"" + std::string(capitalization) +
+           "\",\"conditions\":" + std::string(conditions) +
+           ",\"position\":\"any\",\"role\":\"" + std::string(role) +
+           "\",\"rule_id\":\"" + std::string(id) +
+           "\",\"schema\":\"kilix.voicegen.heteronym-rule/v1\"," +
+           "\"source\":\"project-test-fixture\"," +
+           "\"target\":\"record\"}\n";
+}
+
+std::string heteronym_fixture(
+    kgv::PronunciationAdmission admission,
+    std::string_view base_lexicon_sha256,
+    std::string_view review,
+    bool ambiguous = false) {
+    const std::size_t entry_count = ambiguous ? 3U : 2U;
+    std::string resource =
+        "{\"admission\":\"" + admission_name(admission) +
+        "\",\"base_lexicon_sha256\":\"" +
+        std::string(base_lexicon_sha256) +
+        "\",\"dialect\":\"en-AU\",\"entry_count\":" +
+        std::to_string(entry_count) +
+        ",\"resource_id\":\"kilix-en-au-resolution-heteronyms-test-1\"," +
+        "\"review_record_sha256\":" + review_json(review) +
+        ",\"schema\":\"kilix.voicegen.heteronym-rules/v1\"}\n";
+    resource += heteronym_rule(
+        "fixture.record.after-a", "noun", "any",
+        "[{\"offset\":-1,\"words\":[\"a\"]}]");
+    resource += heteronym_rule(
+        "fixture.record.after-will", "verb", "lower",
+        "[{\"offset\":-1,\"words\":[\"will\"]}]");
+    if (ambiguous) {
+        resource += heteronym_rule("fixture.record.any-lower", "noun",
+                                   "lower", "[]");
+    }
     return resource;
 }
 
@@ -207,10 +266,12 @@ struct LoadedResources final {
     kgv::ResolvedFrontendResources chain(
         kgv::PronunciationAdmission admission,
         const kgv::PronunciationLexicon *user_dictionary = nullptr,
-        std::string_view frontend_abi = kFrontendAbi) const {
+        std::string_view frontend_abi = kFrontendAbi,
+        const kgv::HeteronymRules *heteronym_rules = nullptr) const {
         kgv::ResolvedFrontendResources resources;
         resources.base_lexicon = &lexicon;
         resources.user_dictionary = user_dictionary;
+        resources.heteronym_rules = heteronym_rules;
         resources.lts = &lts;
         resources.model_tokens = &tokens;
         resources.required_admission = admission;
@@ -218,6 +279,22 @@ struct LoadedResources final {
         return resources;
     }
 };
+
+kgv::HeteronymRules load_heteronyms(
+    kgv::PronunciationAdmission admission,
+    std::string_view base_lexicon_sha256,
+    std::string_view review = {},
+    bool ambiguous = false) {
+    const std::string resource = heteronym_fixture(
+        admission, base_lexicon_sha256, review, ambiguous);
+    kgv::HeteronymRules rules;
+    kgv::HeteronymResourceFailure failure;
+    require(kgv::load_heteronym_rules(
+                resource, kgv::sha256_hex(resource), base_lexicon_sha256,
+                admission, &rules, &failure) == KGV_OK,
+            "resolution heteronym fixture did not load");
+    return rules;
+}
 
 kgv::PronunciationLexicon load_user_dictionary(
     const std::vector<kgv::SegmentDefinition> &dictionary_segments) {
@@ -283,6 +360,7 @@ void require_cleared(const kgv::ResolvedFrontendResult &result) {
                 result.request_override_count == 0U &&
                 result.frontend_abi_sha256.empty() &&
                 result.user_dictionary_sha256.empty() &&
+                result.heteronym_rules_sha256.empty() &&
                 result.pronunciation_lexicon_sha256.empty() &&
                 result.lts_sha256.empty() && result.words.empty() &&
                 result.phrases.empty() && result.diagnostics.empty() &&
@@ -350,6 +428,8 @@ void require_same(const kgv::ResolvedFrontendResult &left,
                 left.frontend_abi_sha256 == right.frontend_abi_sha256 &&
                 left.user_dictionary_sha256 ==
                     right.user_dictionary_sha256 &&
+                left.heteronym_rules_sha256 ==
+                    right.heteronym_rules_sha256 &&
                 left.pronunciation_lexicon_sha256 ==
                     right.pronunciation_lexicon_sha256 &&
                 left.lts_sha256 == right.lts_sha256 &&
@@ -364,6 +444,8 @@ void require_same(const kgv::ResolvedFrontendResult &left,
         const kgv::ResolvedFrontendWord &b = right.words[index];
         require(a.normalized == b.normalized &&
                     a.source_kind == b.source_kind && a.role == b.role &&
+                    a.role_source == b.role_source &&
+                    a.context_rule_id == b.context_rule_id &&
                     a.pronunciation_source == b.pronunciation_source &&
                     a.request_override_kind == b.request_override_kind &&
                     a.request_override_index == b.request_override_index &&
@@ -591,6 +673,161 @@ int main() {
         }
 
         {
+            const kgv::HeteronymRules context_rules = load_heteronyms(
+                kgv::PronunciationAdmission::test_fixture,
+                loaded.lexicon.resource_sha256());
+            const kgv::ResolvedFrontendResources context_resources =
+                loaded.chain(kgv::PronunciationAdmission::test_fixture,
+                             nullptr, kFrontendAbi, &context_rules);
+            kgv::ResolvedFrontendResult contextual;
+            require(kgv::run_resolved_frontend(
+                        "I will record a record.", KGV_PROFILE_PROSE,
+                        context_resources, {}, &contextual,
+                        &failure) == KGV_OK,
+                    "valid contextual heteronym sentence was rejected");
+            require(contextual.heteronym_rules_sha256 ==
+                        context_rules.resource_sha256() &&
+                        contextual.words.size() == 5U &&
+                        contextual.diagnostics.empty() &&
+                        contextual.words[2U].role == "verb" &&
+                        contextual.words[2U].role_source ==
+                            kgv::ResolvedRoleSource::contextual_rule &&
+                        contextual.words[2U].context_rule_id ==
+                            "fixture.record.after-will" &&
+                        contextual.words[2U].syllables[0U].segment_ids ==
+                            std::vector<std::uint16_t>({4U}) &&
+                        contextual.words[4U].role == "noun" &&
+                        contextual.words[4U].role_source ==
+                            kgv::ResolvedRoleSource::contextual_rule &&
+                        contextual.words[4U].context_rule_id ==
+                            "fixture.record.after-a" &&
+                        contextual.words[4U].syllables[0U].segment_ids ==
+                            std::vector<std::uint16_t>({1U}) &&
+                        contextual.model_tokens.chunks.size() == 1U &&
+                        contextual.model_tokens.chunks[0U].ids ==
+                            std::vector<std::uint16_t>({
+                                1U,
+                                3U, 4U, 6U, 18U,
+                                3U, 4U, 6U, 20U,
+                                3U, 4U, 6U, 20U,
+                                3U, 4U, 5U, 18U,
+                                3U, 4U, 6U, 17U,
+                                12U, 2U,
+                            }),
+                    "contextual rules did not select exact heteronym variants");
+            require(std::string(kgv::resolved_role_source_name(
+                        contextual.words[2U].role_source)) ==
+                        "CONTEXTUAL_RULE",
+                    "contextual role source name changed");
+
+            kgv::ResolvedFrontendResult defaulted_context;
+            require(kgv::run_resolved_frontend(
+                        "record.", KGV_PROFILE_PROSE, context_resources, {},
+                        &defaulted_context, &failure) == KGV_OK &&
+                        defaulted_context.words.size() == 1U &&
+                        defaulted_context.words[0U].role == "default" &&
+                        defaulted_context.words[0U].role_source ==
+                            kgv::ResolvedRoleSource::default_role &&
+                        defaulted_context.words[0U].context_rule_id.empty() &&
+                        defaulted_context.words[0U]
+                                .syllables[0U].segment_ids ==
+                            std::vector<std::uint16_t>({1U}) &&
+                        defaulted_context.diagnostics.size() == 1U &&
+                        defaulted_context.diagnostics[0U].code ==
+                            "HETERONYM_DEFAULTED",
+                    "unmatched contextual target did not use its documented default");
+
+            kgv::ResolvedFrontendResult explicit_role;
+            require(kgv::run_resolved_frontend(
+                        "I will record.", KGV_PROFILE_PROSE,
+                        context_resources, {"", "", "noun"},
+                        &explicit_role, &failure) == KGV_OK &&
+                        explicit_role.words[2U].role == "noun" &&
+                        explicit_role.words[2U].role_source ==
+                            kgv::ResolvedRoleSource::explicit_request &&
+                        explicit_role.words[2U].context_rule_id.empty() &&
+                        explicit_role.words[2U]
+                                .syllables[0U].segment_ids ==
+                            std::vector<std::uint16_t>({1U}) &&
+                        explicit_role.diagnostics.empty(),
+                    "explicit role did not precede contextual selection");
+
+            kgv::RequestPronunciationOverride phone;
+            phone.span = kgv::SourceSpan{7U, 13U};
+            phone.kind = kgv::RequestOverrideKind::phone_syllables;
+            phone.syllables = {{
+                kgv::SyllableStress::primary,
+                std::vector<std::uint16_t>({2U}),
+            }};
+            kgv::ResolvedFrontendResult phone_wins;
+            require(kgv::run_resolved_frontend(
+                        "I will record.", KGV_PROFILE_PROSE,
+                        context_resources, {}, {phone}, &phone_wins,
+                        &failure) == KGV_OK &&
+                        phone_wins.words[2U].pronunciation_source ==
+                            kgv::ResolvedPronunciationSource::request_override &&
+                        phone_wins.words[2U].role_source ==
+                            kgv::ResolvedRoleSource::default_role &&
+                        phone_wins.words[2U].context_rule_id.empty() &&
+                        phone_wins.words[2U].syllables[0U].segment_ids ==
+                            std::vector<std::uint16_t>({2U}) &&
+                        phone_wins.diagnostics.empty(),
+                    "phone override did not precede contextual selection");
+
+            kgv::RequestPronunciationOverride replacement;
+            replacement.span = kgv::SourceSpan{7U, 10U};
+            replacement.replacement_text = "record";
+            kgv::ResolvedFrontendResult replaced_context;
+            require(kgv::run_resolved_frontend(
+                        "I will dog.", KGV_PROFILE_PROSE,
+                        context_resources, {}, {replacement},
+                        &replaced_context, &failure) == KGV_OK &&
+                        replaced_context.words[2U].normalized == "record" &&
+                        replaced_context.words[2U].span.byte_start == 7U &&
+                        replaced_context.words[2U].span.byte_end == 10U &&
+                        replaced_context.words[2U].role == "verb" &&
+                        replaced_context.words[2U].role_source ==
+                            kgv::ResolvedRoleSource::contextual_rule &&
+                        replaced_context.words[2U].context_rule_id ==
+                            "fixture.record.after-will" &&
+                        replaced_context.words[2U].pronunciation_source ==
+                            kgv::ResolvedPronunciationSource::base_lexicon,
+                    "replacement text did not re-enter contextual role selection");
+
+            const kgv::HeteronymRules ambiguous_rules = load_heteronyms(
+                kgv::PronunciationAdmission::test_fixture,
+                loaded.lexicon.resource_sha256(), {}, true);
+            const kgv::ResolvedFrontendResources ambiguous_resources =
+                loaded.chain(kgv::PronunciationAdmission::test_fixture,
+                             nullptr, kFrontendAbi, &ambiguous_rules);
+            kgv::ResolvedFrontendResult ambiguous_context;
+            require(kgv::run_resolved_frontend(
+                        "I will record.", KGV_PROFILE_PROSE,
+                        ambiguous_resources, {}, &ambiguous_context,
+                        &failure) == KGV_OK &&
+                        ambiguous_context.words[2U].role == "default" &&
+                        ambiguous_context.words[2U].role_source ==
+                            kgv::ResolvedRoleSource::default_role &&
+                        ambiguous_context.words[2U]
+                                .syllables[0U].segment_ids ==
+                            std::vector<std::uint16_t>({1U}) &&
+                        ambiguous_context.diagnostics.size() == 2U &&
+                        ambiguous_context.diagnostics[0U].code ==
+                            "HETERONYM_RULE_AMBIGUOUS" &&
+                        ambiguous_context.diagnostics[1U].code ==
+                            "HETERONYM_DEFAULTED",
+                    "overlapping contextual rules did not fail closed to the default");
+
+            kgv::ResolvedFrontendResult repeated_context;
+            require(kgv::run_resolved_frontend(
+                        "I will record a record.", KGV_PROFILE_PROSE,
+                        context_resources, {}, &repeated_context,
+                        &failure) == KGV_OK,
+                    "repeated contextual request failed");
+            require_same(contextual, repeated_context);
+        }
+
+        {
             kgv::RequestPronunciationOverride replacement;
             replacement.span = kgv::SourceSpan{0U, 3U};
             replacement.kind = kgv::RequestOverrideKind::replacement_text;
@@ -749,7 +986,7 @@ int main() {
         {
             kgv::RequestPronunciationOverride ambiguous_replacement;
             ambiguous_replacement.span = kgv::SourceSpan{0U, 3U};
-            ambiguous_replacement.replacement_text = "Record";
+            ambiguous_replacement.replacement_text = "lead";
             require_override_failure(
                 "dog.", resources, {}, {ambiguous_replacement},
                 KGV_INVALID_TEXT, "AMBIGUOUS_PRONUNCIATION_ROLE", 0U);
@@ -807,7 +1044,7 @@ int main() {
                         "FRONTEND_ROLE_COUNT_MISMATCH");
         require_failure("cat.", resources, {"NotCanonical"},
                         KGV_INVALID_ARGUMENT, "INVALID_FRONTEND_WORD_ROLE");
-        require_failure("Record.", resources, {}, KGV_INVALID_TEXT,
+        require_failure("lead.", resources, {}, KGV_INVALID_TEXT,
                         "AMBIGUOUS_PRONUNCIATION_ROLE");
         require_failure("dad.", resources, {}, KGV_INVALID_TEXT,
                         "UNKNOWN_PRONUNCIATION");
@@ -860,6 +1097,55 @@ int main() {
                             "FRONTEND_USER_DICTIONARY_INVENTORY_MISMATCH");
         }
         {
+            kgv::HeteronymRules unloaded_rules;
+            kgv::ResolvedFrontendResources invalid = resources;
+            invalid.heteronym_rules = &unloaded_rules;
+            require_failure("cat.", invalid, {}, KGV_INVALID_STATE,
+                            "FRONTEND_HETERONYM_RULES_NOT_LOADED");
+        }
+        {
+            const kgv::HeteronymRules product_rules = load_heteronyms(
+                kgv::PronunciationAdmission::product_admitted,
+                loaded.lexicon.resource_sha256(), std::string(64U, 'c'));
+            kgv::ResolvedFrontendResources invalid = resources;
+            invalid.heteronym_rules = &product_rules;
+            require_failure("cat.", invalid, {}, KGV_ABI_MISMATCH,
+                            "FRONTEND_HETERONYM_ADMISSION_MISMATCH");
+        }
+        {
+            const std::string other_lexicon(64U, 'b');
+            const kgv::HeteronymRules wrong_lexicon = load_heteronyms(
+                kgv::PronunciationAdmission::test_fixture, other_lexicon);
+            kgv::ResolvedFrontendResources invalid = resources;
+            invalid.heteronym_rules = &wrong_lexicon;
+            require_failure("cat.", invalid, {}, KGV_ABI_MISMATCH,
+                            "FRONTEND_HETERONYM_LEXICON_MISMATCH");
+        }
+        {
+            std::string incompatible_resource = heteronym_fixture(
+                kgv::PronunciationAdmission::test_fixture,
+                loaded.lexicon.resource_sha256(), {});
+            const std::string needle = "\"role\":\"verb\"";
+            const std::size_t offset = incompatible_resource.find(needle);
+            require(offset != std::string::npos,
+                    "heteronym role mismatch fixture drifted");
+            incompatible_resource.replace(
+                offset, needle.size(), "\"role\":\"adjective\"");
+            kgv::HeteronymRules incompatible;
+            kgv::HeteronymResourceFailure rule_failure;
+            require(kgv::load_heteronym_rules(
+                        incompatible_resource,
+                        kgv::sha256_hex(incompatible_resource),
+                        loaded.lexicon.resource_sha256(),
+                        kgv::PronunciationAdmission::test_fixture,
+                        &incompatible, &rule_failure) == KGV_OK,
+                    "heteronym role mismatch fixture did not load");
+            kgv::ResolvedFrontendResources invalid = resources;
+            invalid.heteronym_rules = &incompatible;
+            require_failure("cat.", invalid, {}, KGV_ABI_MISMATCH,
+                            "FRONTEND_HETERONYM_ROLE_MISMATCH");
+        }
+        {
             const std::string review_a(64U, 'a');
             const std::string review_b(64U, 'b');
             const LoadedResources product = load_resources(
@@ -869,6 +1155,23 @@ int main() {
                 "cat.",
                 product.chain(kgv::PronunciationAdmission::product_admitted),
                 {}, KGV_ABI_MISMATCH, "FRONTEND_REVIEW_RECORD_MISMATCH");
+        }
+        {
+            const std::string review_a(64U, 'a');
+            const std::string review_b(64U, 'b');
+            const LoadedResources product = load_resources(
+                kgv::PronunciationAdmission::product_admitted, review_a,
+                review_a);
+            const kgv::HeteronymRules mismatched_rules = load_heteronyms(
+                kgv::PronunciationAdmission::product_admitted,
+                product.lexicon.resource_sha256(), review_b);
+            require_failure(
+                "cat.",
+                product.chain(
+                    kgv::PronunciationAdmission::product_admitted, nullptr,
+                    kFrontendAbi, &mismatched_rules),
+                {}, KGV_ABI_MISMATCH,
+                "FRONTEND_HETERONYM_REVIEW_MISMATCH");
         }
         {
             const std::string review(64U, 'a');

@@ -85,6 +85,7 @@ kgv_sanitizers(kilix_voicegen_support)
 
 add_library(kilix_voicegen_frontend STATIC
   src/frontend/frontend.cpp
+  src/frontend/heteronyms.cpp
   src/frontend/lts.cpp
   src/frontend/overrides.cpp
   src/frontend/pipeline.cpp
@@ -293,6 +294,15 @@ if(BUILD_TESTING)
   kgv_project_warnings(test_pronunciation)
   kgv_sanitizers(test_pronunciation)
   add_test(NAME pronunciation_resource COMMAND test_pronunciation)
+
+  add_executable(test_heteronyms tests/test_heteronyms.cpp)
+  target_link_libraries(test_heteronyms PRIVATE kilix_voicegen_frontend)
+  target_include_directories(test_heteronyms PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  kgv_project_warnings(test_heteronyms)
+  kgv_sanitizers(test_heteronyms)
+  add_test(NAME heteronym_resource COMMAND test_heteronyms)
 
   add_executable(test_lts tests/test_lts.cpp)
   target_link_libraries(test_lts PRIVATE kilix_voicegen_frontend)
