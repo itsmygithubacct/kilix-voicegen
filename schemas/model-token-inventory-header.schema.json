@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:kilix:voicegen:schema:model-token-inventory-header:v1",
+  "title": "Kilix Voicegen model-token inventory JSONL header",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "admission", "dialect", "resource_id", "segment_inventory_sha256", "frontend_abi_sha256", "maximum_input_tokens", "entry_count"],
+  "properties": {
+    "schema": {"const": "kilix.voicegen.model-token-inventory/v1"},
+    "admission": {"enum": ["product-admitted", "local-user", "test-fixture"]},
+    "dialect": {"const": "en-AU"},
+    "resource_id": {"type": "string", "pattern": "^[a-z][a-z0-9._:/-]{0,127}$"},
+    "segment_inventory_sha256": {"$ref": "#/$defs/sha256"},
+    "frontend_abi_sha256": {"$ref": "#/$defs/sha256"},
+    "maximum_input_tokens": {"type": "integer", "minimum": 8, "maximum": 65535},
+    "entry_count": {"type": "integer", "minimum": 18, "maximum": 65535}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

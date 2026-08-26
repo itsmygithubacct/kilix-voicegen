@@ -11,12 +11,13 @@
     "inventory_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "chunks": {
       "type": "array",
+      "maxItems": 65536,
       "items": {
         "type": "object",
         "additionalProperties": false,
         "required": ["ids", "source_byte_start", "source_byte_end", "continuation"],
         "properties": {
-          "ids": {"type": "array", "minItems": 2, "items": {"type": "integer", "minimum": 0, "maximum": 65535}},
+          "ids": {"type": "array", "minItems": 2, "maxItems": 65535, "items": {"type": "integer", "minimum": 0, "maximum": 65535}},
           "source_byte_start": {"type": "integer", "minimum": 0, "maximum": 65536},
           "source_byte_end": {"type": "integer", "minimum": 0, "maximum": 65536},
           "continuation": {"type": "boolean"}

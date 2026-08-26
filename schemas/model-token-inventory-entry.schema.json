@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:kilix:voicegen:schema:model-token-inventory-entry:v1",
+  "title": "Kilix Voicegen model-token inventory JSONL entry",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "id", "kind", "name", "segment_id"],
+      "properties": {
+        "schema": {"const": "kilix.voicegen.model-token-entry/v1"},
+        "id": {"type": "integer", "minimum": 0, "maximum": 65535},
+        "kind": {"const": "control"},
+        "name": {"enum": ["PAD", "BOS", "EOS", "WB", "SYL", "STRESS_0", "STRESS_1", "STRESS_2", "END_NONE", "END_COMMA", "END_COLON", "END_SEMICOLON", "END_PERIOD", "END_QUESTION", "END_EXCLAMATION", "END_PARAGRAPH", "END_CONTINUATION"]},
+        "segment_id": {"type": "null"}
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "id", "kind", "name", "segment_id"],
+      "properties": {
+        "schema": {"const": "kilix.voicegen.model-token-entry/v1"},
+        "id": {"type": "integer", "minimum": 0, "maximum": 65535},
+        "kind": {"const": "segment"},
+        "name": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,31}$"},
+        "segment_id": {"type": "integer", "minimum": 1, "maximum": 65535}
+      }
+    }
+  ]
+}

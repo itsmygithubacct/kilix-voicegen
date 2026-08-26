@@ -12,9 +12,10 @@ repository provides the frozen C ABI draft, strict model-package verification,
 strict UTF-8/control validation, a typed lexical frontend trace, a native CLI,
 and a deterministic fixture engine. P1 implementation is active: the pinned
 utf8proc/Unicode 17 dependency now supplies NFC with original-byte spans, and the
-staged lexical/normalization vectors execute. Reviewed pronunciation data,
-final model tokens, recording pilots, and neural inference remain open. A strict
-pronunciation-resource ABI and native loader now bind canonical `en-AU` JSONL
+staged lexical/normalization vectors execute. Reviewed pronunciation data, a
+product model-token inventory, recording pilots, and neural inference remain
+open. A strict pronunciation-resource ABI and native loader now bind canonical
+`en-AU` JSONL
 to caller-pinned file and segment-inventory hashes, enforce bounded NFC entries
 and role-qualified syllables, and require a separate review-record hash before a
 resource can be admitted as product data. No product lexicon has yet passed that
@@ -120,6 +121,15 @@ JSONL; it records a SHA-256 word split and held-out exact-symbol, exact-word,
 and segment-edit metrics. Product mode additionally requires the exact source
 lexicon, alignment, license, and review evidence files—not only their claimed
 hash strings. Generated forests and reports remain outside this repository.
+
+The model-token inventory is also a caller-hash-pinned `en-AU` JSONL resource.
+It must contain exactly the 17 required controls and one mapping for every
+segment in the pinned inventory, with strictly increasing unique 16-bit model
+IDs and an explicit model input budget. The native serializer emits atomic
+`BOS/WB/SYL/STRESS/segment/END/EOS` sequences, never emits `PAD`, chooses
+paragraph/sentence/clause/comma boundaries in that order when a chunk is
+required, and marks both sides of a forced word-boundary continuation. No
+product inventory or final token IDs have yet been frozen.
 
 `tools/build_en_au_lexicon_candidate.py` converts an explicitly hashed CMUdict
 snapshot into a deterministic candidate and Australian-review queue outside the
