@@ -55,7 +55,10 @@ satisfy the production consent/provenance gate.
 An out-of-tree CMake build needs a C++17 compiler, Python 3.11 or newer, and a
 clean checkout of utf8proc at the exact revision in
 `cmake/dependencies.lock.json`. Point CMake at that source checkout; utf8proc is
-built statically. The default build has no neural-runtime dependency.
+built statically. The default build has no neural-runtime dependency; in it
+the Piper interoperability test `piper_pilot_interop` is still registered and
+`ctest` reports it as skipped, naming each unmet precondition, so the total
+stays at 21 and the gate says which arm did not run.
 
 ```sh
 export KGV_UTF8PROC_SOURCE_DIR=/path/to/utf8proc

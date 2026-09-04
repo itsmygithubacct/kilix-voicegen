@@ -342,10 +342,27 @@ if(BUILD_TESTING)
 
   string(LENGTH "${KGV_PIPER_PILOT_RELEASE_SHA}"
     KGV_PIPER_PILOT_RELEASE_SHA_LENGTH)
-  if(KGV_ENABLE_ONNXRUNTIME AND
-     EXISTS "${KGV_PIPER_PILOT_MODEL_DIR}/RELEASE.json" AND
-     KGV_PIPER_PILOT_RELEASE_SHA_LENGTH EQUAL 64 AND
-     KGV_PIPER_PILOT_RELEASE_SHA MATCHES "^[0-9a-f]+$")
+  # The Piper interop test is registered whether or not it can run. In the
+  # default build none of its preconditions hold, and an unregistered test is
+  # invisible: ctest reported "100% tests passed" out of 20 with nothing to say
+  # that the newest feature's only interop test had not been exercised. When a
+  # precondition is unmet the test is registered as a stub that names every
+  # unmet one and is reported as skipped, so the denominator stays at 21 and
+  # the gate says which arm did not run.
+  set(KGV_PIPER_PILOT_UNMET)
+  if(NOT KGV_ENABLE_ONNXRUNTIME)
+    list(APPEND KGV_PIPER_PILOT_UNMET "KGV_ENABLE_ONNXRUNTIME is OFF")
+  endif()
+  if(NOT EXISTS "${KGV_PIPER_PILOT_MODEL_DIR}/RELEASE.json")
+    list(APPEND KGV_PIPER_PILOT_UNMET
+      "KGV_PIPER_PILOT_MODEL_DIR has no RELEASE.json")
+  endif()
+  if(NOT KGV_PIPER_PILOT_RELEASE_SHA_LENGTH EQUAL 64 OR
+     NOT KGV_PIPER_PILOT_RELEASE_SHA MATCHES "^[0-9a-f]+$")
+    list(APPEND KGV_PIPER_PILOT_UNMET
+      "KGV_PIPER_PILOT_RELEASE_SHA is not 64 lowercase hex digits")
+  endif()
+  if(NOT KGV_PIPER_PILOT_UNMET)
     add_test(NAME piper_pilot_interop
       COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_piper_pilot.py")
@@ -359,6 +376,13 @@ if(BUILD_TESTING)
     set_tests_properties(piper_pilot_interop PROPERTIES
       ENVIRONMENT "${KGV_PIPER_PILOT_TEST_ENV}"
       TIMEOUT 90)
+  else()
+    string(JOIN ", " KGV_PIPER_PILOT_UNMET_TEXT ${KGV_PIPER_PILOT_UNMET})
+    add_test(NAME piper_pilot_interop
+      COMMAND "${CMAKE_COMMAND}" -E echo
+        "piper_pilot_interop SKIPPED: ${KGV_PIPER_PILOT_UNMET_TEXT}")
+    set_tests_properties(piper_pilot_interop PROPERTIES
+      SKIP_REGULAR_EXPRESSION "piper_pilot_interop SKIPPED")
   endif()
 
   add_test(NAME repository_boundaries
