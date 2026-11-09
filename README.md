@@ -45,10 +45,11 @@ cmake --build --preset dev
 ctest --preset dev
 ```
 
-Inspect the lexical frontend without a model:
+Inspect the lexical frontend without a model. The `dev` preset builds outside
+the tree, so the CLI is in `../.build/kilix-voicegen-dev`:
 
 ```sh
-kilix-voicegen frontend --profile prose --text 'Meet at 09:05 on 2026-08-25.'
+../.build/kilix-voicegen-dev/kilix-voicegen frontend --profile prose --text 'Meet at 09:05 on 2026-08-25.'
 ```
 
 The ONNX Runtime research build, the sanitizer preset and installation are in
